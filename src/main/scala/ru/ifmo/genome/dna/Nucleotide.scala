@@ -6,7 +6,7 @@ package ru.ifmo.genome.dna
 sealed abstract class Nucleotide(val complement: Nucleotide, val byte: Byte, val name: String) {
   val char = name(0)
 
-  Nucleotide.nucleotidesByByte += byte -> this
+  Nucleotide.nucleotidesByByte(byte) = this
   Nucleotide.nucleotidesByName += name -> this
   Nucleotide.nucleotidesByChar += char -> this
   
@@ -19,7 +19,7 @@ object Nucleotide {
   case object G extends Nucleotide(C, 2, "G")
   case object C extends Nucleotide(G, 3, "C")
 
-  var nucleotidesByByte = Map[Byte, Nucleotide]()
+  var nucleotidesByByte = new Array[Nucleotide](4)
   var nucleotidesByChar = Map[Char, Nucleotide]()
   var nucleotidesByName = Map[String, Nucleotide]()
 

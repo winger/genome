@@ -5,5 +5,5 @@ import ru.ifmo.genome.dna.Nucleotide
  */
 
 Nucleotide.A
-println(Nucleotide.nucleotidesByByte)
+println(Nucleotide.nucleotidesByByte.mkString(sep = ","))
 collection.mutable.Seq
