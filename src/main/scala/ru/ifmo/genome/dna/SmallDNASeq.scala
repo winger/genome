@@ -67,7 +67,7 @@ object SmallDNASeq {
   def apply(xs: Base*) = (newBuilder ++= xs).result()
 
   def newBuilder = new Builder[Base, SmallDNASeq] {
-    var l1, l2 = 0
+    var l1, l2 = 0L
     var count = 0
     var longBuilder: ArrayBuilder[Long] = null
 
@@ -81,9 +81,9 @@ object SmallDNASeq {
         l2 = 0
       }
       if (count < n) {
-        l1 |= elem.toInt << (count * bits)
+        l1 |= elem.toInt.toLong << (count * bits)
       } else {
-        l2 |= elem.toInt << (count % n * bits)
+        l2 |= elem.toInt.toLong << (count % n * bits)
       }
       count += 1
       this
@@ -101,7 +101,10 @@ object SmallDNASeq {
     def result() = {
       if (count <= n) new Long1DNASeq(l1, count.toByte)
       else if (count <= 2 * n) new Long2DNASeq(l1, l2, count.toByte)
-      else new ArrayDNASeq(longBuilder.result(), count)
+      else {
+        longBuilder += l2
+        new ArrayDNASeq(longBuilder.result(), count)
+      }
     }
   }
 

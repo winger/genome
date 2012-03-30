@@ -7,4 +7,8 @@ import ru.ifmo.genome.dna.DNASeq._
  */
 
 var ar = SmallDNASeq(A, T, G, C, A)
-println(ar + " " + ar.reverse + " " + ar.complement + " " + ar.revComplement)
+for (it <- 0 until 5) {
+  ar = ar ++ ar
+}
+println(ar.length + " " + ar)
+assert(ar == ar.revComplement.revComplement)
