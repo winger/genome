@@ -64,9 +64,7 @@ object SmallDNASeq {
   private[dna] val n = 64 / bits
   private[dna] val mask = (1L << bits) - 1
 
-  def apply(xs: Base*) = (newBuilder ++= xs).result()
-
-  def newBuilder = new Builder[Base, SmallDNASeq] {
+  private[dna] def newBuilder = new Builder[Base, SmallDNASeq] {
     var l1, l2 = 0L
     var count = 0
     var longBuilder: ArrayBuilder[Long] = null
@@ -107,6 +105,8 @@ object SmallDNASeq {
       }
     }
   }
+
+  def apply(xs: Base*) = (newBuilder ++= xs).result()
 
   implicit def canBuildFrom = new CanBuildFrom[SmallDNASeq, Base, SmallDNASeq] {
     def apply() = newBuilder
