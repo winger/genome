@@ -1,38 +1,42 @@
-import akka.dispatch._
-import akka.util.duration._
-import java.util.concurrent.Executors
+import collection.mutable.ArrayBuffer
+import java.io._
+import java.util.logging.Logger
 import ru.ifmo.genome.dna._
-import ru.ifmo.genome.dna.Base._
-import ru.ifmo.genome.dna.DNASeq._
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
 
 object Test extends App {
+  val log = Logger.getLogger("Test")
 
-  implicit val ec = ExecutionContext.fromExecutorService(Executors.newFixedThreadPool(4))
+  val file = new File(args(0))
+  val in = new BufferedReader(new FileReader(file))
+  val insert = 200
+  val k = 32
+  val n = 36
+  
+  val badLines = ArrayBuffer[String]()
 
-  def f(s: String) = Future {
-    println("start: " + s)
-    Thread.sleep(1000)
-    println("stop: " + s)
-    s
+  def processRead(): Boolean = {
+    if (in.readLine() != null) {
+      val line: String = in.readLine()
+      val seq = line.map(Base.fromChar.get(_))
+      if (seq.forall(_.isDefined)) {
+        val read = SmallDNASeq(seq.flatten: _*)
+        //println(read)
+      } else {
+        badLines += line
+      }
+      in.readLine()
+      val quality = in.readLine()
+      true
+    } else {
+      false
+    }
   }
-  val sum = for {
-    a <- f("A")
-    b <- f("B")
-    c <- f("C")
-  } yield a + b + c
-
-  println(Await.result(sum, 10.seconds))
-
-  ec.shutdown()
-
-  var ar = SmallDNASeq(A, T, G, C, A)
-  for (it <- 0 until 5) {
-    ar = ar ++ ar
-  }
-  println(ar.length + " " + ar)
-  assert(ar == ar.revComplement.revComplement)
+  
+  while (processRead()) {}
+  
+  println(badLines.size)
 }
