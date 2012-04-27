@@ -30,7 +30,7 @@ object SimpleGraphProcessor extends App {
   var count = 0
   for ((p1, p2) <- data.getPairs) {
     add(p1.take(k))
-    add(p2.take(k).reverse)
+    add(p2.take(k).revComplement)
     count += 1
     progress(count.toDouble / data.count)
   }
@@ -44,82 +44,68 @@ object SimpleGraphProcessor extends App {
 //  println(hist.toSeq.sortBy(_._1))
 //  println(hist.map(_._2).sum)
 
-  val reads: collection.Set[SmallDNASeq] = readsFreq.keySet ++ readsFreq.keySet.map(_.revComplement)
+  val reads: collection.Set[SmallDNASeq] = readsFreq.keySet
 
-  def contains(x: SmallDNASeq) = reads.contains(x)
+  def contains(x: SmallDNASeq) = reads.contains(x) || reads.contains(x.revComplement)
 
   def incoming(x: SmallDNASeq) = {
-    for (base <- Base.fromInt if contains(base +: x.drop(1))) yield {
+    for (base <- Base.fromInt if contains(base +: x.take(k - 1))) yield {
       base
     }
   }
 
   def outcoming(x: SmallDNASeq) = {
-    for (base <- Base.fromInt if contains(x.take(k - 1) :+ base)) yield {
+    for (base <- Base.fromInt if contains(x.drop(1) :+ base)) yield {
       base
     }
   }
 
   val graph = collection.mutable.Map[SmallDNASeq, Node]()
 
-  def rewind(read: SmallDNASeq, from: SmallDNASeq = null): SmallDNASeq = {
-    val inEdges = incoming(read)
-    if (read == from || inEdges.size != 1) {
-      read
-    } else {
-      rewind(inEdges(0) +: read.drop(1), if (from == null) read else from)
-    }
-  }
-
-  class EdgeBuilder(val from: Node, val first: Base) {
-    val seq: Builder[Base, SmallDNASeq] = SmallDNASeq.newBuilder += first
-    var length: Long = 1L
-  }
-
   val out = new PrintWriter(outfile)
 
-  def dfs(read: SmallDNASeq, edgeBuilder: EdgeBuilder = null): Edge = {
-    val outEdges = outcoming(read)
-    if (edgeBuilder != null && outEdges.size == 1 && incoming(read).size == 1) {
-      graph(read) = new EdgeNode(read, edgeBuilder.from, edgeBuilder.first, edgeBuilder.length)
-      edgeBuilder.length += 1
-      edgeBuilder.seq += outEdges(0)
-      dfs(read.drop(1) :+ outEdges(0), edgeBuilder)
-    } else {
-      val node = {
-        graph.get(read) match {
-          case None => {
-            val n = new TerminalNode(read)
-            for (base <- outEdges) {
-              n.outEdges += base -> dfs(read.drop(1) :+ base, new EdgeBuilder(n, base))
-            }
-            n
-          }
-          case Some(n@TerminalNode(_)) => n
-        }
-      }
-      if (edgeBuilder != null) {
-        val edge = new Edge(edgeBuilder.from, node, edgeBuilder.seq.result())
-        node.inEdges ::= edge
-        out.println(edge.seq.toString)
-        out.flush()
-        edge
-      } else {
-        null
-      }
-    }
-  }
+  val termReads = reads.filter(read => incoming(read).size != 1 || outcoming(read).size != 1)
+  println(termReads.size)
 
   {
-    var progress = new ConsoleProgress("building graph", 80)
-    var count = 0d
-    for (read <- reads) {
-      if (!graph.contains(read)) {
-        dfs(rewind(read))
-      }
-      count += 1
-      progress(count / reads.size)
+    val progress = new ConsoleProgress("building graph", 80)
+
+    for (read <- termReads) {
+      graph(read) = new TerminalNode(read)
+      graph(read.revComplement) = new TerminalNode(read.revComplement)
+     progress(graph.size.toDouble / reads.size / 2.)
     }
+    
+    def buildEdges(read: SmallDNASeq) {
+      val node = graph(read).asInstanceOf[TerminalNode]
+      for (base <- outcoming(read)) {
+        val builder = SmallDNASeq.newBuilder += base
+        var seq = read.drop(1) :+ base
+        var length = 1
+        while (!graph.contains(seq)) {
+          graph(seq) = new EdgeNode(read, node, base, length)
+          val out = outcoming(seq)
+          assert(out.size == 1, seq + " " + out)
+          builder += out(0)
+          length += 1
+          seq = seq.drop(1) :+ out(0)
+        }
+        val node1 = graph(seq)
+        val edge = new Edge(node, node1, builder.result())
+        node1.asInstanceOf[TerminalNode].inEdges ::= edge
+        node.outEdges += base -> edge
+        out.println(edge.seq)
+      }
+    }
+
+    for (read <- termReads) {
+      buildEdges(read)
+      buildEdges(read.revComplement)
+      progress(graph.size.toDouble / reads.size / 2d)
+    }
+
+    //TODO perfect cycles are missing
+    
     progress.done()
   }
 

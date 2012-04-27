@@ -8,8 +8,8 @@ import ru.ifmo.genome.dna.SmallDNASeq
  * @author Vladislav Isenbaev (vladislav.isenbaev@odnoklassniki.ru)
  */
 
+@SerialVersionUID(9165674273301814920L)
 class PairedEndData(val count: Long, val insert: Int, val len: Int, val bin: File) extends Serializable {
-  val serialVersionUID = 1;
 
   def write(f: File) {
     val stream = new ObjectOutputStream(new FileOutputStream(f))
