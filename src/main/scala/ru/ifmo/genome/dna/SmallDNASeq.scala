@@ -103,7 +103,7 @@ object SmallDNASeq {
     out.write(writeBuffer, 0, 8)
   }
 
-  private[dna] def newBuilder = new Builder[Base, SmallDNASeq] {
+  def newBuilder = new Builder[Base, SmallDNASeq] {
     var l1, l2 = 0L
     var b = 0
     var count = 0
