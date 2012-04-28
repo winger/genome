@@ -18,9 +18,9 @@ object SimpleGraphProcessor extends App {
 
   val data = PairedEndData(infile)
   val k = 25
+  val rounds = 3
 
   val filter = {
-    val rounds = 4
     val filters = Array.fill(rounds)(new BloomFilter[DNASeq](60000000, 1e-1))
 
     def add(seq: DNASeq) {
@@ -77,9 +77,9 @@ object SimpleGraphProcessor extends App {
 
     progress.done()
 
-    log.info("Filter false-positives: " + readsFreq.count(_._2 == 1))
+    log.info("Filter false-positives: " + readsFreq.count(_._2 < rounds))
 
-    readsFreq = readsFreq.filter(_._2 > 1)
+    readsFreq = readsFreq.filter(_._2 >= rounds)
   }
 
   val hist = collection.mutable.Map[Int, Int]()
@@ -111,9 +111,9 @@ object SimpleGraphProcessor extends App {
 
   val termReads = reads.filter(read => incoming(read).size != 1 || outcoming(read).size != 1)
 
-  println(termReads.size)
+  log.info("Terminal reads: " + termReads.size)
 
-  println(termReads.filter(read => incoming(read).size > 1 || outcoming(read).size > 1).size)
+  log.info("Split reads: " + termReads.count(read => incoming(read).size > 1 || outcoming(read).size > 1))
 
   {
     val progress = new ConsoleProgress("building graph", 80)
@@ -121,7 +121,7 @@ object SimpleGraphProcessor extends App {
     for (read <- termReads) {
       graph(read) = new TerminalNode(read)
       graph(read.revComplement) = new TerminalNode(read.revComplement)
-     progress(graph.size.toDouble / reads.size / 2.)
+      progress(graph.size.toDouble / reads.size / 2d)
     }
     
     def buildEdges(read: DNASeq) {
@@ -131,6 +131,7 @@ object SimpleGraphProcessor extends App {
         var seq = read.drop(1) :+ base
         var length = 1
         while (!graph.contains(seq)) {
+          assert(contains(seq)) //TODO remove
           graph(seq) = new EdgeNode(read, node, base, length)
           val out = outcoming(seq)
           assert(out.size == 1, seq + " " + out.toSeq)

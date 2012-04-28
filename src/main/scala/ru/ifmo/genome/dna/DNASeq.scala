@@ -73,9 +73,7 @@ private class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
   override def hashCode = long.##
 
   override def hashCode(seed: Int) = {
-    val murmur = new MurmurHash[Long](seed)
-    murmur(long)
-    murmur.hash
+    ((long * seed) ^ ((long >> 32) * seed)).##
   }
 }
 
@@ -104,10 +102,7 @@ private class Long2DNASeq(val long1: Long, val long2: Long, val len: Byte) exten
   }
 
   override def hashCode(seed: Int) = {
-    val murmur = new MurmurHash[Long](seed)
-    murmur(long1)
-    murmur(long2)
-    murmur.hash
+    ((long1 * seed) ^ ((long1 >> 32) * seed) ^ (long2 * seed) ^ ((long2 >> 32) * seed)).##
   }
 }
 
