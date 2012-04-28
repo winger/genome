@@ -7,6 +7,7 @@ import java.util.logging.Logger
 import ru.ifmo.genome.data.PairedEndData
 import ru.ifmo.genome.dna._
 import ru.ifmo.genome.util.ConsoleProgress
+import sun.java2d.pipe.BufferedTextPipe
 import sun.nio.ch.ChannelInputStream
 
 /**
@@ -21,8 +22,7 @@ object Convert2bin extends App {
 
   val insert = 200
   val n = 36
-  
-  val badLines = ArrayBuffer[String]()
+  val k = 25
 
   {
     val inCh = new FileInputStream(infile).getChannel
@@ -31,25 +31,27 @@ object Convert2bin extends App {
 
     val progress = new ConsoleProgress("convert to binary", 80)
 
+    var kmers = 0L
+
+    def addFiltered(withQ: Seq[(Char, Char)]) {
+      val filtered = withQ.takeWhile(p => Base.fromChar.contains(p._1) && p._2 - '!' >= 30)
+      val seq = DNASeq(filtered.map(p => Base.fromChar(p._1)): _*)
+      out.write(ByteBuffer.wrap(Array(seq.length.toByte)))
+      out.write(ByteBuffer.wrap(seq.toByteArray))
+      if (filtered.length >= k) {
+        kmers += filtered.length - k + 1
+      }
+    }
+
     def processRead(): Boolean = {
       if (in.readLine() == null) {
         false
       } else {
-        val line: String = in.readLine()
-        val seq = line.map(Base.fromChar.get(_))
-        if (seq.forall(_.isDefined)) {
-          val read = SmallDNASeq(seq.flatten: _*)
-          val (p1, p2) = read.splitAt(n)
-          assert(p1.length == p2.length)
-          assert(p1 == SmallDNASeq(p1.toByteArray, p1.length))
-          out.write(ByteBuffer.wrap(p1.toByteArray))
-          out.write(ByteBuffer.wrap(p2.toByteArray))
-        } else {
-          badLines += line
-        }
+        val (line1, line2) = in.readLine().splitAt(n)
         in.readLine()
-        val quality = in.readLine()
-
+        val (quality1, quality2) = in.readLine().splitAt(n)
+        addFiltered(line1 zip quality1)
+        addFiltered(line2 zip quality2)
         progress(inCh.position().toDouble / inCh.size())
         true
       }
@@ -63,9 +65,11 @@ object Convert2bin extends App {
 
     out.close()
 
-    new PairedEndData(count, insert, n, outfile).write(new File(args(1)))
+    new PairedEndData(count, insert, outfile).write(new File(args(1)))
+
+    println(kmers)
   }
 
 
-  println(badLines.size + " " + outfile.length)
+  println(outfile.length)
 }

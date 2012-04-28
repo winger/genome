@@ -35,7 +35,7 @@ object HashChecker extends App {
         val line: String = in.readLine()
         val seq = line.map(Base.fromChar.get(_))
         if (seq.forall(_.isDefined)) {
-          val read = SmallDNASeq(seq.flatten: _*)
+          val read = DNASeq(seq.flatten: _*)
           val (p1, p2) = read.splitAt(n)
           hashes += p1.hashCode
           hashes += p2.hashCode
@@ -85,7 +85,7 @@ object HashChecker extends App {
       if (str == null) {
         false
       } else {
-        val seq: SmallDNASeq = SmallDNASeq(str, n)
+        val seq: DNASeq = DNASeq(str, n)
         hashes += seq.hashCode
         progress(inCh.position().toDouble / inCh.size())
         true

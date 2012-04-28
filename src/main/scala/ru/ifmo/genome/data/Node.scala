@@ -1,6 +1,6 @@
 package ru.ifmo.genome.data
 
-import ru.ifmo.genome.dna.{Base, SmallDNASeq}
+import ru.ifmo.genome.dna.{Base, DNASeq}
 
 
 /**
@@ -8,11 +8,11 @@ import ru.ifmo.genome.dna.{Base, SmallDNASeq}
  * @author Vladislav Isenbaev (vladislav.isenbaev@odnoklassniki.ru)
  */
 
-abstract class Node(val seq: SmallDNASeq)
+abstract class Node(val seq: DNASeq)
 
-case class TerminalNode(override val seq: SmallDNASeq) extends Node(seq) {
+case class TerminalNode(override val seq: DNASeq) extends Node(seq) {
   var inEdges = List[Edge]()
   var outEdges = Map[Base, Edge]()
 }
 
-class EdgeNode(seq: SmallDNASeq, val from: Node, val base: Base, val dist: Long) extends Node(seq)
+case class EdgeNode(override val seq: DNASeq, from: Node, base: Base, dist: Long) extends Node(seq)

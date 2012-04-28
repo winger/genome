@@ -1,15 +1,15 @@
 package ru.ifmo.genome.data
 
 import java.io._
-import ru.ifmo.genome.dna.SmallDNASeq
+import ru.ifmo.genome.dna.DNASeq
 
 /**
  *
  * @author Vladislav Isenbaev (vladislav.isenbaev@odnoklassniki.ru)
  */
 
-@SerialVersionUID(9165674273301814920L)
-class PairedEndData(val count: Long, val insert: Int, val len: Int, val bin: File) extends Serializable {
+@SerialVersionUID(1L)
+class PairedEndData(val count: Long, val insert: Int, val bin: File) extends Serializable {
 
   def write(f: File) {
     val stream = new ObjectOutputStream(new FileOutputStream(f))
@@ -19,11 +19,16 @@ class PairedEndData(val count: Long, val insert: Int, val len: Int, val bin: Fil
 
   def getPairs = {
     val in = new FileInputStream(bin)
-    val buf = new Array[Byte]((len + 3) / 4)
+    var buf = Array.ofDim[Byte](32)
 
     def read() = {
-      in.read(buf)
-      SmallDNASeq(buf, len)
+      val len = in.read()
+      val byteLen = (len + 3) / 4
+      while (buf.length < byteLen) {
+        buf = Array.ofDim(buf.length * 2)
+      }
+      in.read(buf, 0, byteLen)
+      DNASeq(buf.take(byteLen), len)
     }
 
     for (i <- 0L until count)
