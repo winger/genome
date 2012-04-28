@@ -86,10 +86,10 @@ object SimpleGraphProcessor extends App {
   for ((_, count) <- readsFreq) {
     hist(count) = hist.getOrElse(count, 0) + 1
   }
-  log.info("Reads count histogram:" + hist.toSeq.sortBy(_._1))
+  log.info("Reads count histogram: " + hist.toSeq.sortBy(_._1))
 
   val reads: collection.Set[DNASeq] = readsFreq.keySet
-  log.info("good reads count:" + reads.size)
+  log.info("good reads count: " + reads.size)
 
   def contains(x: DNASeq) = reads.contains(x) || reads.contains(x.revComplement)
 
