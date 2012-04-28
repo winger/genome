@@ -45,6 +45,7 @@ object SimpleGraphProcessor extends App {
 //  println(hist.map(_._2).sum)
 
   val reads: collection.Set[SmallDNASeq] = readsFreq.keySet
+  println(reads.size)
 
   def contains(x: SmallDNASeq) = reads.contains(x) || reads.contains(x.revComplement)
 
@@ -66,6 +67,8 @@ object SimpleGraphProcessor extends App {
 
   val termReads = reads.filter(read => incoming(read).size != 1 || outcoming(read).size != 1)
   println(termReads.size)
+  
+  println(termReads.filter(read => incoming(read).size > 1 || outcoming(read).size > 1).size)
 
   {
     val progress = new ConsoleProgress("building graph", 80)
