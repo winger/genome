@@ -9,11 +9,11 @@ sealed abstract class Base(val toInt: Int) {
 
 object Base {
   case object A extends Base(0)
-  case object T extends Base(1)
-  case object G extends Base(2)
-  case object C extends Base(3)
+  case object G extends Base(1)
+  case object C extends Base(2)
+  case object T extends Base(3)
 
-  val fromInt = Array[Base](A, T, G, C)
+  val fromInt = Array[Base](A, G, C, T)
   val complement = Map[Base, Base](A -> T, T -> A, G -> C, C -> G)
   val fromChar = Map[Char, Base](fromInt.map(b => b.toString.apply(0) -> b): _*)
   

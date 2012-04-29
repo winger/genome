@@ -98,9 +98,8 @@ private class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
   
   def subseq(l: Int, r: Int): Long1DNASeq = {
     assert(0 <= l && l <= r && r <= length)
-    assert(bits * l != 64)
-    assert(bits * (r - l) != 64)
-    new Long1DNASeq((long >>> (bits * l)) & ((1L << (bits * (r - l))) - 1), (r - l).toByte)
+    val mask = if (r - l == n) -1L else (1L << (bits * (r - l))) - 1
+    new Long1DNASeq((long >>> (bits * l)) & mask, (r - l).toByte)
   }
 
   override def take(n: Int) = subseq(0, (n max 0) min length)
@@ -133,6 +132,21 @@ private class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
     } else {
       super.+:(elem)(bf)
     }
+  }
+
+  override def reverse = {
+    var i = long
+    i = (i & 0x3333333333333333L) << 2 | (i >>> 2) & 0x3333333333333333L;
+    i = (i & 0x0f0f0f0f0f0f0f0fL) << 4 | (i >>> 4) & 0x0f0f0f0f0f0f0f0fL;
+    i = (i & 0x00ff00ff00ff00ffL) << 8 | (i >>> 8) & 0x00ff00ff00ff00ffL;
+    i = (i << 48) | ((i & 0xffff0000L) << 16) |
+      ((i >>> 16) & 0xffff0000L) | (i >>> 48);
+    new Long1DNASeq(i >>> (bits * (n - length)), length.toByte)
+  }
+
+  override def complement = {
+    val mask = if (length == 64) -1L else (1L << (bits * length)) - 1
+    new Long1DNASeq(long ^ mask, length.toByte)
   }
 }
 
