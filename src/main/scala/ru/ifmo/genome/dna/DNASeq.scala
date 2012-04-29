@@ -1,13 +1,13 @@
 package ru.ifmo.genome.dna
 
-import collection.IndexedSeqLike
-import collection.mutable.{ArrayBuilder, Builder}
-import collection.generic.CanBuildFrom
-import com.sun.xml.internal.messaging.saaj.util.ByteOutputStream
-import java.nio.ByteBuffer
-import java.io.{OutputStream, DataOutputStream, ByteArrayOutputStream}
+import collection.mutable.Builder
+import java.io.{OutputStream, ByteArrayOutputStream}
 import akka.routing.MurmurHash
 import ru.ifmo.genome.ds.MultiHash
+import java.util.Arrays
+import collection.{GenSeqLike, IndexedSeqLike}
+import collection.generic.{SeqFactory, CanBuildFrom}
+import ru.ifmo.genome.dna.DNASeq.GenCanBuildFrom
 
 /**
  * @author Vladislav Isenbaev (vladislav.isenbaev@odnoklassniki.ru)
@@ -23,8 +23,11 @@ abstract class DNASeq extends IndexedSeq[Base] with IndexedSeqLike[Base, DNASeq]
   def complement: DNASeq = map(_.complement)
   def revComplement: DNASeq = complement.reverse
 
-  def :>>(base: Base) = drop(1) :+ base
-  def <<:(base: Base) = base +: take(length - 1)
+  override def multiHashCode(seed: Int) = {
+    val murmur = new MurmurHash[Base](seed)
+    foreach(murmur)
+    murmur.hash
+  }
 }
 
 private class ArrayDNASeq(val data: Array[Byte], val length: Int) extends DNASeq {
@@ -41,17 +44,24 @@ private class ArrayDNASeq(val data: Array[Byte], val length: Int) extends DNASeq
 
   def toByteArray = data
 
-  override def hashCode(seed: Int) = {
+  override def multiHashCode(seed: Int) = {
     val murmur = new MurmurHash[Byte](seed)
     data.foreach(murmur)
     murmur.hash
+  }
+
+  //optimizations
+
+  override def equals(o: Any) = o match {
+    case that: ArrayDNASeq => length == that.length && Arrays.equals(data, that.data)
+    case _ => super.equals(o)
   }
 }
 
 private class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
   import DNASeq._
 
-  assert(len <= n)
+  assert(len <= n && (len == n || (long & ~((1L << (bits * len)) - 1)) == 0))
 
   def apply(i: Int) = {
     if (i < 0 || len <= i) {
@@ -70,17 +80,66 @@ private class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
     ar
   }
 
+  //optimizations
+
   override def hashCode = long.##
 
-  override def hashCode(seed: Int) = {
-    ((long * seed) ^ ((long >> 32) * seed)).##
+  override def multiHashCode(seed: Int) = {
+    val t = (long ^ (long >> 32)) * seed
+    (t ^ (t >> 32)).toInt
+  }
+
+  override def equals(o: Any) = o match {
+    case that: Long1DNASeq => length == that.length && long == that.long
+    case _ => super.equals(o)
+  }
+
+  //TODO: add those to Long2DNASeq
+  
+  def subseq(l: Int, r: Int): Long1DNASeq = {
+    assert(0 <= l && l <= r && r <= length)
+    assert(bits * l != 64)
+    assert(bits * (r - l) != 64)
+    new Long1DNASeq((long >>> (bits * l)) & ((1L << (bits * (r - l))) - 1), (r - l).toByte)
+  }
+
+  override def take(n: Int) = subseq(0, (n max 0) min length)
+
+  override def drop(n: Int) = subseq((n max 0) min length, length)
+
+  override def sliding[B](size: Int, step: Int): Iterator[DNASeq] = {
+    if (length < size) {
+      Iterator.single(this)
+    } else {
+      for (i <- Iterator.range(0, length - size + 1, step)) yield subseq(i, i + size)
+    }
+  }
+
+  override def +:[B >: Base, That](elem: B)(implicit bf: CanBuildFrom[DNASeq, B, That]): That = {
+    if (bf.isInstanceOf[DNASeq.GenCanBuildFrom] && elem.isInstanceOf[Base] && length < n) {
+      val newLong = (long << bits) | elem.asInstanceOf[Base].toInt
+      val newLength = (length + 1).toByte
+      new Long1DNASeq(newLong, newLength).asInstanceOf[That]
+    } else {
+      super.+:(elem)(bf)
+    }
+  }
+
+  override def :+[B >: Base, That](elem: B)(implicit bf: CanBuildFrom[DNASeq, B, That]): That = {
+    if (bf.isInstanceOf[DNASeq.GenCanBuildFrom] && elem.isInstanceOf[Base] && length < n) {
+      val newLong = long | (elem.asInstanceOf[Base].toInt.toLong << (length * bits))
+      val newLength = (length + 1).toByte
+      new Long1DNASeq(newLong, newLength).asInstanceOf[That]
+    } else {
+      super.+:(elem)(bf)
+    }
   }
 }
 
 private class Long2DNASeq(val long1: Long, val long2: Long, val len: Byte) extends DNASeq {
   import DNASeq._
 
-  assert(n < len && len <= 2 * n)
+  assert(n < len && len <= 2 * n && (len == 2 * n || (long2 & ~((1L << (bits * (len - n))) - 1)) == 0))
 
   def apply(i: Int) = {
     if (i < 0 || len <= i) {
@@ -101,9 +160,19 @@ private class Long2DNASeq(val long1: Long, val long2: Long, val len: Byte) exten
     ar
   }
 
-  override def hashCode(seed: Int) = {
-    ((long1 * seed) ^ ((long1 >> 32) * seed) ^ (long2 * seed) ^ ((long2 >> 32) * seed)).##
+  //optimizations
+
+  override def multiHashCode(seed: Int) = {
+    val t = (long1 ^ (long1 >> 32)) * seed
+    val t1 = (long2 ^ (long2 >> 32) ^ t) * seed
+    (t1 ^ (t1 >> 32)).toInt
   }
+
+  override def equals(o: Any) = o match {
+    case that: Long2DNASeq => length == that.length && long1 == that.long1 && long2 == that.long2
+    case _ => super.equals(o)
+  }
+
 }
 
 object DNASeq {
@@ -193,9 +262,11 @@ object DNASeq {
       new ArrayDNASeq(ar, length)
     }
   }
-
-  implicit def canBuildFrom = new CanBuildFrom[DNASeq, Base, DNASeq] {
+  
+  class GenCanBuildFrom extends CanBuildFrom[DNASeq, Base, DNASeq] {
     def apply() = newBuilder
     def apply(from: DNASeq) = newBuilder
   }
+
+  implicit def canBuildFrom: CanBuildFrom[DNASeq, Base, DNASeq] = new GenCanBuildFrom
 }

@@ -1,5 +1,8 @@
+package ru.ifmo.genome.scripts
+
+import collection.mutable.ConcurrentMap
 import java.io._
-import java.util.logging.Logger
+import java.util.concurrent.ConcurrentHashMap
 import ru.ifmo.genome.data._
 import ru.ifmo.genome.dna._
 import ru.ifmo.genome.ds.BloomFilter
@@ -11,28 +14,33 @@ import scala.App
  */
 
 object SimpleGraphProcessor extends App {
-  val log = Logger.getLogger("SimpleGraphProcessor")
+  val (logger, formatter) = ZeroLoggerFactory.newLogger(SimpleGraphProcessor)
+
+  import formatter._
+
+  logger.info("Started")
 
   val infile = new File(args(0))
   val outfile = new File(args(1))
 
   val data = PairedEndData(infile)
   val k = 25
-  val rounds = 3
+  val rounds = 10
+
+  val chunkSize = 1024
 
   val filter = {
     val filters = Array.fill(rounds)(new BloomFilter[DNASeq](60000000, 1e-1))
 
     def add(seq: DNASeq) {
-      for (x <- seq.sliding(k)) {
-        val rcx = x.revComplement
-        val y = if (x.hashCode < rcx.hashCode) x else rcx
-        var index = 0
-        while (index < rounds && filters(index).contains(y)) {
-          index += 1
-        }
-        if (index < rounds) {
-          filters(index).add(y)
+      if (seq.length >= k) {
+        for (x <- seq.sliding(k)) {
+          val rcx = x.revComplement
+          val y = if (x.hashCode < rcx.hashCode) x else rcx
+          var index = 0
+          while (index < rounds && filters(index).add(y)) {
+            index += 1
+          }
         }
       }
     }
@@ -40,10 +48,12 @@ object SimpleGraphProcessor extends App {
     val progress = new ConsoleProgress("filter", 80)
 
     var count = 0
-    for ((p1, p2) <- data.getPairs) {
-      add(p1)
-      add(p2)
-      count += 1
+    for (chunk <- data.getPairs.grouped(chunkSize)) {
+      for ((p1, p2) <- chunk.par) {
+        add(p1)
+        add(p2)
+      }
+      count += chunk.size
       progress(count.toDouble / data.count)
     }
 
@@ -52,15 +62,26 @@ object SimpleGraphProcessor extends App {
     filters(rounds - 1)
   }
 
-  var readsFreq = collection.mutable.Map[DNASeq, Int]()
+  import collection.JavaConversions._
 
-  {
+  val readsFreq = {
+    val readsFreq0: ConcurrentMap[DNASeq, Int] = new ConcurrentHashMap[DNASeq, Int]()
+
     def add(seq: DNASeq) {
-      for (x <- seq.sliding(k)) {
-        val rcx = x.revComplement
-        val y = if (x.hashCode < rcx.hashCode) x else rcx
-        if (filter.contains(y)) {
-          readsFreq(y) = readsFreq.getOrElse(y, 0) + 1
+      if (seq.length >= k) {
+        for (x <- seq.sliding(k)) {
+          val rcx = x.revComplement
+          val y = if (x.hashCode < rcx.hashCode) x else rcx
+          if (filter.contains(y)) {
+            var done = false
+            if (!readsFreq0.contains(y)) {
+              done |= readsFreq0.putIfAbsent(y, 1).isEmpty
+            }
+            while (!done) {
+              val v = readsFreq0(y)
+              done |= readsFreq0.replace(y, v, v + 1)
+            }
+          }
         }
       }
     }
@@ -68,28 +89,30 @@ object SimpleGraphProcessor extends App {
     val progress = new ConsoleProgress("kmers", 80)
 
     var count = 0
-    for ((p1, p2) <- data.getPairs) {
-      add(p1)
-      add(p2)
-      count += 1
+    for (chunk <- data.getPairs.grouped(chunkSize)) {
+      for ((p1, p2) <- chunk.par) {
+        add(p1)
+        add(p2)
+      }
+      count += chunk.size
       progress(count.toDouble / data.count)
     }
 
     progress.done()
 
-    log.info("Filter false-positives: " + readsFreq.count(_._2 < rounds))
+    logger.info("Filter false-positives: " + readsFreq0.count(_._2 < rounds))
 
-    readsFreq = readsFreq.filter(_._2 >= rounds)
+    readsFreq0.filter(_._2 >= rounds)
   }
 
-  val hist = collection.mutable.Map[Int, Int]()
-  for ((_, count) <- readsFreq) {
-    hist(count) = hist.getOrElse(count, 0) + 1
-  }
-  log.info("Reads count histogram: " + hist.toSeq.sortBy(_._1))
+  //  val hist = collection.mutable.Map[Int, Int]()
+  //  for ((_, count) <- readsFreq) {
+  //    hist(count) = hist.getOrElse(count, 0) + 1
+  //  }
+  //  logger.info("Reads count histogram: " + hist.toSeq.sortBy(_._1))
 
   val reads: collection.Set[DNASeq] = readsFreq.keySet
-  log.info("good reads count: " + reads.size)
+  logger.info("Good reads count: " + reads.size)
 
   def contains(x: DNASeq) = reads.contains(x) || reads.contains(x.revComplement)
 
@@ -109,11 +132,16 @@ object SimpleGraphProcessor extends App {
 
   val out = new PrintWriter(outfile)
 
-  val termReads = reads.filter(read => incoming(read).size != 1 || outcoming(read).size != 1)
+  val termReads = reads.par.filter {
+    read =>
+      val in = incoming(read).size
+      val out = outcoming(read).size
+      (in != 1 || out != 1) && (in != 0 || out != 0)
+  }.seq
 
-  log.info("Terminal reads: " + termReads.size)
+  logger.info("Terminal reads: " + termReads.size)
 
-  log.info("Split reads: " + termReads.count(read => incoming(read).size > 1 || outcoming(read).size > 1))
+  logger.info("Split reads: " + termReads.count(read => incoming(read).size > 1 || outcoming(read).size > 1))
 
   {
     val progress = new ConsoleProgress("building graph", 80)
@@ -123,7 +151,7 @@ object SimpleGraphProcessor extends App {
       graph(read.revComplement) = new TerminalNode(read.revComplement)
       progress(graph.size.toDouble / reads.size / 2d)
     }
-    
+
     def buildEdges(read: DNASeq) {
       val node = graph(read).asInstanceOf[TerminalNode]
       for (base <- outcoming(read)) {
@@ -131,7 +159,6 @@ object SimpleGraphProcessor extends App {
         var seq = read.drop(1) :+ base
         var length = 1
         while (!graph.contains(seq)) {
-          assert(contains(seq)) //TODO remove
           graph(seq) = new EdgeNode(read, node, base, length)
           val out = outcoming(seq)
           assert(out.size == 1, seq + " " + out.toSeq)
@@ -147,16 +174,20 @@ object SimpleGraphProcessor extends App {
       }
     }
 
-    for (read <- termReads) {
-      buildEdges(read)
-      buildEdges(read.revComplement)
+    for (chunk <- termReads.iterator.grouped(chunkSize)) {
+      for (read <- chunk) {
+        buildEdges(read)
+        buildEdges(read.revComplement)
+      }
       progress(graph.size.toDouble / reads.size / 2d)
     }
 
     //TODO perfect cycles are missing
-    
+
     progress.done()
   }
+
+  logger.info("Graph nodes: " + graph.size)
 
   out.close()
 }

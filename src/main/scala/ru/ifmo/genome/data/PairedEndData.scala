@@ -18,7 +18,7 @@ class PairedEndData(val count: Long, val insert: Int, val bin: File) extends Ser
   }
 
   def getPairs = {
-    val in = new FileInputStream(bin)
+    val in = new BufferedInputStream(new FileInputStream(bin))
     var buf = Array.ofDim[Byte](32)
 
     def read() = {
@@ -31,7 +31,7 @@ class PairedEndData(val count: Long, val insert: Int, val bin: File) extends Ser
       DNASeq(buf.take(byteLen), len)
     }
 
-    for (i <- 0L until count)
+    for (i <- (0L until count).iterator)
       yield (read(), read())
   }
 }

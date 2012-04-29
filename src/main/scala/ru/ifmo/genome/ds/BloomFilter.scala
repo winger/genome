@@ -2,6 +2,7 @@ package ru.ifmo.genome.ds
 
 import util.Random
 import collection.mutable.BitSet
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  *
@@ -9,27 +10,38 @@ import collection.mutable.BitSet
  */
 
 trait MultiHash {
-  def hashCode(seed: Int): Int
-  override def hashCode = hashCode(42)
+  def multiHashCode(seed: Int): Int
+  override def hashCode = multiHashCode(42)
 }
 
 class BloomFilter[T <: MultiHash](val n: Long, p: Double) {
   import BloomFilter._
 
   private val (k, m) = calcParams(n, p)
-  println(k, m)
-  private var count = 0
+  private val count = new AtomicInteger()
   private val set = new BitSet(m)
+  
+  private val mySeeds = Array[Int](seeds.take(k): _*)
+  
+  private val locks = Array.fill[AnyRef](32)(new AnyRef)
 
-  def add(seq: T) {
-    count += 1
-    assert(count <= n)
-    hashes_(seq).foreach(set += _)
+  def add(seq: T): Boolean = {
+    locks(seq.hashCode & (locks.size - 1)).synchronized {
+      var add = false
+      hashes_(seq).foreach { i =>
+        add |= !set(i)
+        set += i
+      }
+      if (add) {
+        assert(count.incrementAndGet() <= n)
+      }
+      add
+    }
   }
 
   def contains(seq: T) = hashes_(seq).forall(set)
 
-  private def hashes_(seq: T) = hashes(seq, k).map(_ & (m - 1))
+  private def hashes_(seq: T) = hashes(seq, mySeeds).map(improve(_) & (m - 1))
 }
 
 object BloomFilter {
@@ -41,12 +53,19 @@ object BloomFilter {
     (k, m)
   }
 
+  def improve(hcode: Int) = {
+    //from hashtable
+    var i = hcode * 0x9e3775cd
+    i = java.lang.Integer.reverseBytes(i)
+    i * 0x9e3775cd
+  }
+
   val seeds = {
     val rnd = new Random(42)
     Stream.continually(rnd.nextInt())
   }
 
-  def hashes(a: MultiHash, k: Int): Seq[Int] = {
-    seeds.take(k).map(a.hashCode(_))
+  def hashes(a: MultiHash, seeds: Array[Int]): Seq[Int] = {
+    seeds.map(a.multiHashCode(_))
   }
 }

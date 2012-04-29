@@ -1,3 +1,5 @@
+package ru.ifmo.genome.scripts
+
 import collection.mutable.ArrayBuffer
 import io.{Source, BufferedSource}
 import java.io._
