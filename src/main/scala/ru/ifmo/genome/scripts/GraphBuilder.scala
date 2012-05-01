@@ -3,7 +3,6 @@ package ru.ifmo.genome.scripts
 import java.io._
 import scala.App
 import ru.ifmo.genome.data._
-import resource._
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
@@ -45,7 +44,5 @@ object GraphBuilder extends App {
   logger.info("Max component size: " + maxComponent.size)
   graph.retain(maxComponent)
 
-  for (out <- managed(new ObjectOutputStream(new FileOutputStream(outfile)))) {
-    out.writeObject(graph)
-  }
+  graph.write(outfile)
 }

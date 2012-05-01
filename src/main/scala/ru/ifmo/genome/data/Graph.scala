@@ -3,15 +3,22 @@ package ru.ifmo.genome.data
 import ru.ifmo.genome.util.ConsoleProgress
 import ru.ifmo.genome.dna.{Base, DNASeq}
 import java.io._
-import com.sun.jmx.remote.internal.ArrayQueue
-import collection.mutable.{ArrayBuffer, ArraySeq, ArrayStack, HashSet}
+import collection.mutable.{ArrayBuffer, ArrayStack, HashSet}
+import com.esotericsoftware.kryo.io.{Input, Output}
+import com.esotericsoftware.kryo.{KryoSerializable, Kryo}
+import com.esotericsoftware.kryo.util.ObjectMap
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
 
 @SerialVersionUID(1L)
-class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collection.mutable.Map[DNASeq, Node]) extends Serializable {
+class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collection.mutable.Map[DNASeq, Node]) extends KryoSerializable {
+  import Graph._
+  import formatter._
+  
+  //TODO make external serializator
+  private def this() = this(collection.mutable.Set[DNASeq](), collection.mutable.Map[DNASeq, Node]()) // for serialization only
 
   def retain(nodes: Seq[TerminalNode]) {
     val set = nodes.map(_.seq).toSet
@@ -47,7 +54,7 @@ class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collecti
   def writeDot(out: PrintWriter) {
     out.println("digraph G {")
     for (kmer <- termKmers; node = nodeMap(kmer).asInstanceOf[TerminalNode]; edge <- node.outEdges.values) {
-      out.println("%s -> %s [label=%d]".format(edge.startSeq, edge.endSeq, edge.seq.length))
+      out.println("%s -> %s [label=%d]".format(edge.start.seq, edge.end.seq, edge.seq.length))
     }
     out.println("}")
     out.close()
@@ -64,6 +71,39 @@ class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collecti
   }
 
   def edges = termKmers.flatMap(x => nodeMap(x).asInstanceOf[TerminalNode].outEdges.values).toSeq
+
+  def write(file: File) {
+    val kryo = new Kryo()
+    val out = new Output(new FileOutputStream(file))
+    kryo.writeObject(out, this)
+    out.close()
+  }
+
+  def write(kryo: Kryo, out: Output) {
+    for (node <- nodeMap.values) {
+      kryo.writeClassAndObject(out, node)
+    }
+    kryo.writeClassAndObject(out, null)
+    for (seq <- termKmers; node = nodeMap(seq).asInstanceOf[TerminalNode];
+         edge <- node.outEdges.values) {
+      kryo.writeObjectOrNull(out, edge)
+    }
+    kryo.writeClassAndObject(out, null)
+  }
+
+  def read(kryo: Kryo, in: Input) {
+    var count = 0
+    for (node <- Iterator.continually(kryo.readClassAndObject(in).asInstanceOf[Node]).takeWhile(_ != null)) {
+      count += 1
+      nodeMap(node.seq) = node
+      if (node.isInstanceOf[TerminalNode]) {
+        termKmers += node.seq
+      }
+    }
+    logger.info("Nodes count: " + count + " " + nodeMap.size)
+    kryo.getGraphContext.asInstanceOf[ObjectMap[Class[_], AnyRef]].put(classOf[Graph], this)
+    Iterator.continually(kryo.readObjectOrNull(in, classOf[Edge])).takeWhile(_ != null).size
+  }
 }
 
 object Graph {
@@ -120,7 +160,7 @@ object Graph {
         var seq = read.drop(1) :+ base
         var length = 1
         while (!nodeMap.contains(seq)) {
-          nodeMap(seq) = new EdgeNode(read, node, base, length)
+          nodeMap(seq) = new EdgeNode(seq, node, base, length)
           val out = outcoming(seq)
           assert(out.size == 1, seq + " " + out.toSeq)
           builder += out(0)
@@ -128,7 +168,7 @@ object Graph {
           seq = seq.drop(1) :+ out(0)
         }
         val node1 = nodeMap(seq).asInstanceOf[TerminalNode]
-        val edge = new Edge(node.seq, node1.seq, builder.result(), nodeMap)
+        val edge = new Edge(node, node1, builder.result())
         node1.asInstanceOf[TerminalNode].inEdges ::= edge
         node.outEdges += base -> edge
       }
@@ -166,13 +206,9 @@ object Graph {
   }
   
   def apply(file: File): Graph = {
-    val in = new ObjectInputStream(new FileInputStream(file)) {
-      override def resolveClass(desc: ObjectStreamClass): Class[_] = {
-        try { Class.forName(desc.getName, false, getClass.getClassLoader) }
-        catch { case ex: ClassNotFoundException => super.resolveClass(desc) }
-      }
-    }
-    val graph = in.readObject().asInstanceOf[Graph]
+    val kryo = new Kryo()
+    val in = new Input(new FileInputStream(file))
+    val graph = kryo.readObject(in, classOf[Graph])
     in.close()
     graph
   }

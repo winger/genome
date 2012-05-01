@@ -19,5 +19,3 @@ libraryDependencies += "com.jsuereth" %% "scala-arm" % "1.2"
 libraryDependencies += "javax.transaction" % "jta" % "1.0.1B" % "provided->default"
 
 libraryDependencies += "org.scalala" %% "scalala" % "1.0.0.RC2-SNAPSHOT"
-
-libraryDependencies += "com.googlecode" % "kryo" % "1.04"

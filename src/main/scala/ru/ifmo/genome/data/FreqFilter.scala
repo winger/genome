@@ -19,7 +19,7 @@ object FreqFilter {
 
   def extractFilteredKmers(data: PairedEndData, k: Int, rounds: Int) = {
     val filter = {
-      val filters = Array.fill(rounds)(new BloomFilter[DNASeq](60000000, 1e-1))
+      val filters = Array.fill(rounds)(new BloomFilter[DNASeq](100000000, 1e-1))
 
       var cc = 0
       
