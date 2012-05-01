@@ -72,6 +72,21 @@ class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collecti
 
   def edges = termKmers.flatMap(x => nodeMap(x).asInstanceOf[TerminalNode].outEdges.values).toSeq
 
+  def termNodes = termKmers.map(nodeMap(_).asInstanceOf[TerminalNode])
+
+  def rebuild() {
+    for (edge <- edges) {
+      val start = edge.seq.head
+      var seq = edge.start.seq.drop(1) :+ start
+      var dist = 1
+      for (base <- edge.seq.tail) {
+        nodeMap(seq) = new EdgeNode(seq, edge.start, start, dist)
+        seq = seq.drop(1) :+ base
+        dist += 1
+      }
+    }
+  }
+
   def write(file: File) {
     val kryo = new Kryo()
     val out = new Output(new FileOutputStream(file))
@@ -80,8 +95,8 @@ class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collecti
   }
 
   def write(kryo: Kryo, out: Output) {
-    for (node <- nodeMap.values) {
-      kryo.writeClassAndObject(out, node)
+    for (seq <- termKmers; node = nodeMap(seq).asInstanceOf[TerminalNode]) {
+      kryo.writeObjectOrNull(out, node)
     }
     kryo.writeClassAndObject(out, null)
     for (seq <- termKmers; node = nodeMap(seq).asInstanceOf[TerminalNode];
@@ -93,16 +108,15 @@ class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collecti
 
   def read(kryo: Kryo, in: Input) {
     var count = 0
-    for (node <- Iterator.continually(kryo.readClassAndObject(in).asInstanceOf[Node]).takeWhile(_ != null)) {
+    for (node <- Iterator.continually(kryo.readObjectOrNull(in, classOf[TerminalNode])).takeWhile(_ != null)) {
       count += 1
       nodeMap(node.seq) = node
-      if (node.isInstanceOf[TerminalNode]) {
-        termKmers += node.seq
-      }
+      termKmers += node.seq
     }
-    logger.info("Nodes count: " + count + " " + nodeMap.size)
     kryo.getGraphContext.asInstanceOf[ObjectMap[Class[_], AnyRef]].put(classOf[Graph], this)
     Iterator.continually(kryo.readObjectOrNull(in, classOf[Edge])).takeWhile(_ != null).size
+    rebuild()
+    logger.info("Graph successfuly read")
   }
 }
 

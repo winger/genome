@@ -32,7 +32,7 @@ object GraphBuilder extends App {
   val hist = components.groupBy(_.size).map(p => (p._1, p._2.size)).toSeq.sortBy(_._1)
   logger.info("Components histogram: " + hist)
 
-  val hist2 = components.groupBy{ comp =>
+  val hist2 = components.groupBy { comp =>
     comp.flatMap(_.outEdges.values).map(_.seq.size).sum
   }.map(p => (p._1, p._2.size)).toSeq.sortBy(_._1)
   logger.info("Components histogram 2: " + hist2)
