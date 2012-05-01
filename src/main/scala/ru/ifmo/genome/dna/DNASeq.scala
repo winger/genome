@@ -30,7 +30,7 @@ abstract class DNASeq extends IndexedSeq[Base] with IndexedSeqLike[Base, DNASeq]
   }
 }
 
-private class ArrayDNASeq(val data: Array[Byte], val length: Int) extends DNASeq {
+class ArrayDNASeq(val data: Array[Byte], val length: Int) extends DNASeq {
   import DNASeq._
 
   assert(data.length > 16 && data.length == (length + n1 - 1) / n1)
@@ -58,7 +58,7 @@ private class ArrayDNASeq(val data: Array[Byte], val length: Int) extends DNASeq
   }
 }
 
-private class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
+class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
   import DNASeq._
 
   assert(len <= n && (len == n || (long & ~((1L << (bits * len)) - 1)) == 0))
@@ -150,7 +150,7 @@ private class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
   }
 }
 
-private class Long2DNASeq(val long1: Long, val long2: Long, val len: Byte) extends DNASeq {
+class Long2DNASeq(val long1: Long, val long2: Long, val len: Byte) extends DNASeq {
   import DNASeq._
 
   assert(n < len && len <= 2 * n && (len == 2 * n || (long2 & ~((1L << (bits * (len - n))) - 1)) == 0))

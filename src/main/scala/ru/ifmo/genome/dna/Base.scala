@@ -3,8 +3,10 @@ package ru.ifmo.genome.dna
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
-sealed abstract class Base(val toInt: Int) {
+sealed abstract class Base(val toInt: Int) extends Serializable {
   def complement = Base.complement(this)
+
+  private def readResolve: AnyRef = Base.fromInt(toInt)
 }
 
 object Base {

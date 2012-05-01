@@ -1,6 +1,5 @@
-package ru.ifmo.genome.scripts
+package ru.ifmo.genome.data
 
-import ru.ifmo.genome.data.PairedEndData
 import ru.ifmo.genome.ds.BloomFilter
 import ru.ifmo.genome.dna.DNASeq
 import ru.ifmo.genome.util.ConsoleProgress
@@ -13,6 +12,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 object FreqFilter {
   val (logger, formatter) = ZeroLoggerFactory.newLogger(FreqFilter)
+
   import formatter._
 
   val chunkSize = 1024
@@ -21,6 +21,8 @@ object FreqFilter {
     val filter = {
       val filters = Array.fill(rounds)(new BloomFilter[DNASeq](60000000, 1e-1))
 
+      var cc = 0
+      
       def add(seq: DNASeq) {
         if (seq.length >= k) {
           for (x <- seq.sliding(k)) {
@@ -39,6 +41,9 @@ object FreqFilter {
       var count = 0
       for (chunk <- data.getPairs.grouped(chunkSize)) {
         for ((p1, p2) <- chunk.par) {
+          if (p1.length >= k && p2.length >= k) {
+            cc += 1
+          }
           add(p1)
           add(p2)
         }
@@ -47,13 +52,14 @@ object FreqFilter {
       }
 
       progress.done()
+      
+      logger.info("CC: " + cc)
 
       filters(rounds - 1)
     }
 
     import collection.JavaConversions._
-
-    val kmersFreq: ConcurrentMap[DNASeq, Int] = new ConcurrentHashMap[DNASeq, Int]()
+    val kmersFreq: ConcurrentMap[DNASeq, Int] = new ConcurrentHashMap[DNASeq, Int]
 
     def add(seq: DNASeq) {
       if (seq.length >= k) {
@@ -93,9 +99,9 @@ object FreqFilter {
     kmersFreq.filter(_._2 >= rounds)
   }
 
-//  val hist = collection.mutable.Map[Int, Int]()
-//  for ((_, count) <- readsFreq) {
-//    hist(count) = hist.getOrElse(count, 0) + 1
-//  }
-//  logger.info("Reads count histogram: " + hist.toSeq.sortBy(_._1))
+  //  val hist = collection.mutable.Map[Int, Int]()
+  //  for ((_, count) <- readsFreq) {
+  //    hist(count) = hist.getOrElse(count, 0) + 1
+  //  }
+  //  logger.info("Reads count histogram: " + hist.toSeq.sortBy(_._1))
 }

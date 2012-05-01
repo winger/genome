@@ -1,15 +1,10 @@
 package ru.ifmo.genome.scripts
 
-import collection.mutable.ArrayBuffer
-import io.{Source, BufferedSource}
 import java.io._
 import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
-import java.util.logging.Logger
 import ru.ifmo.genome.data.PairedEndData
 import ru.ifmo.genome.dna._
 import ru.ifmo.genome.util.ConsoleProgress
-import sun.java2d.pipe.BufferedTextPipe
 import sun.nio.ch.ChannelInputStream
 
 /**
@@ -17,14 +12,15 @@ import sun.nio.ch.ChannelInputStream
  */
 
 object Convert2bin extends App {
-  val log = Logger.getLogger("Convert2bin")
+  val (logger, formatter) = ZeroLoggerFactory.newLogger(Convert2bin)
+  import formatter._
 
   val infile = new File(args(0))
   val outfile = new File(args(1) + ".bin")
 
   val insert = 200
   val n = 36
-  val k = 25
+  val k = 23
 
   {
     val inCh = new FileInputStream(infile).getChannel
@@ -34,15 +30,22 @@ object Convert2bin extends App {
     val progress = new ConsoleProgress("convert to binary", 80)
 
     var kmers = 0L
-
-    def addFiltered(withQ: Seq[(Char, Char)]) {
-      val filtered = withQ.takeWhile(p => Base.fromChar.contains(p._1) && p._2 - '!' >= 30)
-      val seq = DNASeq(filtered.map(p => Base.fromChar(p._1)): _*)
+    var shortReads = 0L
+    
+    def write(seq: DNASeq) {
       out.write(ByteBuffer.wrap(Array(seq.length.toByte)))
       out.write(ByteBuffer.wrap(seq.toByteArray))
+    }
+
+    def filtered(withQ: Seq[(Char, Char)]): DNASeq = {
+      val filtered1 = withQ.takeWhile(p => Base.fromChar.contains(p._1))
+      val (s1, s2) = filtered1.splitAt(k)
+      val filtered = s1 ++ s2.takeWhile(p => p._2 - '!' >= 20)
+      val seq = DNASeq(filtered.map(p => Base.fromChar(p._1)): _*)
       if (filtered.length >= k) {
         kmers += filtered.length - k + 1
       }
+      seq
     }
 
     def processRead(): Boolean = {
@@ -52,8 +55,13 @@ object Convert2bin extends App {
         val (line1, line2) = in.readLine().splitAt(n)
         in.readLine()
         val (quality1, quality2) = in.readLine().splitAt(n)
-        addFiltered(line1 zip quality1)
-        addFiltered(line2 zip quality2)
+        val seq1 = filtered(line1 zip quality1)
+        val seq2 = filtered(line2 zip quality2)
+        if (seq1.length < k || seq2.length < k) {
+          shortReads += 1
+        }
+        write(seq1)
+        write(seq2)
         progress(inCh.position().toDouble / inCh.size())
         true
       }
@@ -69,9 +77,11 @@ object Convert2bin extends App {
 
     new PairedEndData(count, insert, outfile).write(new File(args(1)))
 
-    println(kmers)
+    logger.info("Kmers count: " + kmers)
+
+    logger.info("Short reads count: " + shortReads)
   }
 
 
-  println(outfile.length)
+  logger.info("Result size: " + outfile.length)
 }
