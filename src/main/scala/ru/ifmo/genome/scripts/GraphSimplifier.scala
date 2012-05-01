@@ -38,9 +38,6 @@ object GraphSimplifier extends App {
   val k = graph.termKmers.head.length
   logger.info("K = " + k)
   logger.info("Graph nodes: " + graph.nodeMap.size)
-
-  import collection.JavaConversions._
-  val edgeMap: collection.mutable.ConcurrentMap[Edge, AtomicInteger] = new ConcurrentHashMap[Edge, AtomicInteger]()
   
   val reachable: collection.Map[TerminalNode, collection.Map[TerminalNode, Int]] = {
     for (node <- graph.termNodes) yield {
@@ -105,13 +102,6 @@ object GraphSimplifier extends App {
       val delta = (dist2 - dist1) + k
       if (edge1 == edge2 && range.contains(delta)) {
         distsHist(delta) = distsHist.getOrElse(delta, 0) + 1
-        val counter = {
-          if (!edgeMap.contains(edge1)) {
-            edgeMap.putIfAbsent(edge1, new AtomicInteger())
-          }
-          edgeMap(edge1)
-        }
-        counter.incrementAndGet()
         None
       } else {
         Some((pos1, pos2))
@@ -132,15 +122,13 @@ object GraphSimplifier extends App {
   logger.info("Pairs after: " + annPairs.size)
 
   {
-    import collection.JavaConversions._
-    val pathsHist: collection.mutable.ConcurrentMap[Int, AtomicInteger] = new ConcurrentHashMap[Int, AtomicInteger]()
 
     val progress = new ConsoleProgress("walk pairs", 80)
 
     var count = 0d
     for (chunk <- annPairs.grouped(1024)) {
       for ((pos1, pos2) <- chunk.par) {
-        var pathEdges = collection.mutable.Set[Edge]()
+        var pathEdges = collection.mutable.Set[(Edge, Edge)]()
         val (node2, dist2) = pos2 match {
           case Left(n) => (n, 0L)
           case Right((edge, dist)) =>
@@ -177,13 +165,6 @@ object GraphSimplifier extends App {
           }
           counter.incrementAndGet()
         }
-        val count = {
-          if (!pathsHist.contains(paths)) {
-            pathsHist.putIfAbsent(paths, new AtomicInteger(0))
-          }
-          pathsHist(paths)
-        }
-        count.incrementAndGet()
       }
       count += chunk.size
       progress(count / annPairs.size)
