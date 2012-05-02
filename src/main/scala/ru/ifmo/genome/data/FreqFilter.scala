@@ -18,45 +18,6 @@ object FreqFilter {
   val chunkSize = 1024
 
   def extractFilteredKmers(data: PairedEndData, k: Int, rounds: Int) = {
-    val filter = {
-      val filters = Array.fill(rounds)(new BloomFilter[DNASeq](100000000, 1e-1))
-
-      var cc = 0
-      
-      def add(seq: DNASeq) {
-        if (seq.length >= k) {
-          for (x <- seq.sliding(k)) {
-            val rcx = x.revComplement
-            val y = if (x.hashCode < rcx.hashCode) x else rcx
-            var index = 0
-            while (index < rounds && filters(index).add(y)) {
-              index += 1
-            }
-          }
-        }
-      }
-
-      val progress = new ConsoleProgress("filter", 80)
-
-      var count = 0
-      for (chunk <- data.getPairs.grouped(chunkSize)) {
-        for ((p1, p2) <- chunk.par) {
-          if (p1.length >= k && p2.length >= k) {
-            cc += 1
-          }
-          add(p1)
-          add(p2)
-        }
-        count += chunk.size
-        progress(count.toDouble / data.count)
-      }
-
-      progress.done()
-      
-      logger.info("CC: " + cc)
-
-      filters(rounds - 1)
-    }
 
     import collection.JavaConversions._
     val kmersFreq: ConcurrentMap[DNASeq, Int] = new ConcurrentHashMap[DNASeq, Int]
@@ -66,15 +27,13 @@ object FreqFilter {
         for (x <- seq.sliding(k)) {
           val rcx = x.revComplement
           val y = if (x.hashCode < rcx.hashCode) x else rcx
-          if (filter.contains(y)) {
-            var done = false
-            if (!kmersFreq.contains(y)) {
-              done |= kmersFreq.putIfAbsent(y, 1).isEmpty
-            }
-            while (!done) {
-              val v = kmersFreq(y)
-              done |= kmersFreq.replace(y, v, v + 1)
-            }
+          var done = false
+          if (!kmersFreq.contains(y)) {
+            done |= kmersFreq.putIfAbsent(y, 1).isEmpty
+          }
+          while (!done) {
+            val v = kmersFreq(y)
+            done |= kmersFreq.replace(y, v, v + 1)
           }
         }
       }

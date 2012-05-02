@@ -1,23 +1,24 @@
 package ru.ifmo.genome.scripts
 
-import java.io._
-import scala.App
 import ru.ifmo.genome.data._
+import graph._
 import ru.ifmo.genome.util.ConsoleProgress
 import ru.ifmo.genome.dna.DNASeq
-import collection.parallel.ParSeq
-import collection.immutable.Range.Inclusive
+import scala.collection.parallel.ParSeq
+import scala.collection.immutable.Range.Inclusive
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import collection.mutable.PriorityQueue
+import scala.collection.mutable.PriorityQueue
 import scalala.library.Statistics._
 import scalala.library.Plotting._
 import scalala.tensor.sparse.SparseVector
 import scalala.tensor.dense.DenseVector
+import java.io._
+import scala._
 
 /**
- * Author: Vladislav Isenbaev (isenbaev@gmail.com)
- */
+* Author: Vladislav Isenbaev (isenbaev@gmail.com)
+*/
 
 object GraphSimplifier extends App {
   val (logger, formatter) = ZeroLoggerFactory.newLogger(GraphBuilder)
@@ -33,20 +34,20 @@ object GraphSimplifier extends App {
   val cutoff = 75
 
   val data = PairedEndData(datafile)
-  
-  val graph = Graph(infile)
-  val k = graph.termNodes.head.seq.length
+
+  implicit val graph = Graph(infile)
+  val k = graph.getNodes.head.seq.length
   logger.info("K = " + k)
-  logger.info("Graph nodes: " + graph.nodeMap.size)
-  
-  val reachable: collection.Map[TerminalNode, collection.Map[TerminalNode, Int]] = {
-    for (node <- graph.termNodes) yield {
-      var queue = new PriorityQueue[(Int, TerminalNode)]()(new Ordering[(Int, TerminalNode)]{
-        def compare(x: (Int, TerminalNode), y: (Int, TerminalNode)): Int = {
+  logger.info("Graph nodes: " + graph.getNodes.size)
+
+  val reachable: collection.Map[Node, collection.Map[Node, Int]] = {
+    for (node <- graph.getNodes) yield {
+      var queue = new PriorityQueue[(Int, Node)]()(new Ordering[(Int, Node)]{
+        def compare(x: (Int, Node), y: (Int, Node)): Int = {
           x._1 - y._1
         }
       })
-      val set = collection.mutable.Map[TerminalNode, Int]()
+      val set = collection.mutable.Map[Node, Int]()
       queue += 0 -> node
       while (!queue.isEmpty) {
         val (dist, u) = queue.dequeue()
@@ -66,16 +67,17 @@ object GraphSimplifier extends App {
 
   logger.info("Reachable sets: " + reachable.map(_._2.size).sum)
 
-  var annPairs: Iterator[(Graph.Pos, Graph.Pos)] = {
+  val graphMap = graph.getGraphMap
+
+  var annPairs: Iterator[(List[GraphPosition], List[GraphPosition])] = {
     lazy val progress = new ConsoleProgress("walk pairs", 80)
     var count = 0d
     val annPairs = {
       for (chunk <- data.getPairs.grouped(1024)) yield {
-        val chunkRes: ParSeq[Iterable[(Graph.Pos, Graph.Pos)]] = {
+        val chunkRes: ParSeq[Iterable[(List[GraphPosition], List[GraphPosition])]] = {
           for ((p1: DNASeq, p2: DNASeq) <- chunk.par if p1.length >= k && p2.length >= k) yield {
-            graph.nodeMap.get(p1.take(k)) zip graph.nodeMap.get(p2.take(k).revComplement) map {
-              case (n1, n2) => (graph.getPos(n1), graph.getPos(n2))
-            }
+            (graphMap.get(p1.take(k)) zip graphMap.get(p2.take(k).revComplement)) ++
+            (graphMap.get(p2.take(k)) zip graphMap.get(p1.take(k).revComplement))
           }
         }
         count += chunk.size
@@ -85,43 +87,39 @@ object GraphSimplifier extends App {
     }.flatten
     annPairs
   }
-  
-  annPairs = annPairs flatMap { case (pos1, pos2) =>
-    if (pos1 == null || pos2 == null) {
-      logger.warning("Skipped pair because of multiple locations")
+
+  annPairs = annPairs flatMap { case pair@(positions1, positions2) =>
+    val condition = positions1.exists {
+      case EdgeGraphPosition(edge1, dist1) => positions2.exists {
+        case EdgeGraphPosition(edge2, dist2) => edge1 == edge2 && range.contains((dist2 - dist1) + k)
+        case _ => false
+      }
+      case _ => false
+    }
+    if (condition) {
       None
     } else {
-      if (pos1.isRight && pos2.isRight) {
-        val (edge1, dist1) = pos1.right.get
-        val (edge2, dist2) = pos2.right.get
-        val delta = (dist2 - dist1) + k
-        if (edge1 == edge2 && range.contains(delta)) {
-          None
-        } else {
-          Some((pos1, pos2))
-        }
-      } else {
-        Some((pos1, pos2))
-      }
+      Some(pair)
     }
   }
 
   {
-    import collection.JavaConversions._
+    import scala.collection.JavaConversions._
     val pathsMap: collection.mutable.ConcurrentMap[(Edge, Edge), AtomicInteger] = new ConcurrentHashMap[(Edge, Edge), AtomicInteger]()
 
     var count = 0d
+    var badPairs = 0
     for (chunk <- annPairs.grouped(1024)) {
-      for ((pos1, pos2) <- chunk.par) {
+      for ((positions1, positions2) <- chunk.par; pos1 <- positions1; pos2 <- positions2) {
         var pathEdges = collection.mutable.Set[(Edge, Edge)]()
         val (node2, dist2) = pos2 match {
-          case Left(n) => (n, 0)
-          case Right((edge, dist)) =>
+          case NodeGraphPosition(n) => (n, 0)
+          case EdgeGraphPosition(edge, dist) =>
             (edge.start, dist)
         }
-        val startEdge = pos1.fold(_ => null, _._1)
-        val endEdge = pos2.fold(_ => null, _._1)
-        def dfs(node1: TerminalNode, dist1: Long, prevEdge: Edge): Int = {
+        val startEdge = pos1 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
+        val endEdge = pos1 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
+        def dfs(node1: Node, dist1: Int, prevEdge: Edge): Int = {
           if (dist1 + dist2 + reachable(node2).getOrElse(node1, range.last + 1) > range.last) {
             0
           } else {
@@ -141,14 +139,17 @@ object GraphSimplifier extends App {
           }
         }
         val (node0, dist0) = pos1 match {
-          case Left(n) => (n, 0)
-          case Right((edge, dist)) =>
+          case NodeGraphPosition(n) => (n, 0)
+          case EdgeGraphPosition(edge, dist) =>
             (edge.end, edge.seq.length - dist)
         }
         val paths = dfs(node0, dist0, startEdge)
+        if (paths == 0) {
+          badPairs += 1
+        }
         for (es <- pathEdges) {
           val counter = {
-            if (!pathsMap.contains(es)) pathsMap.putIfAbsent(es, new AtomicInteger())
+            if (!pathsMap.contains(es)) pathsMap.putIfAbsent(es, new AtomicInteger(0))
             pathsMap(es)
           }
           counter.incrementAndGet()
@@ -156,16 +157,18 @@ object GraphSimplifier extends App {
       }
       count += chunk.size
     }
-    
+
+    logger.info("Bad pairs: " + badPairs)
+
     val outf = new PrintWriter(new FileWriter(outfile))
 
+    val toRemove = collection.mutable.Set[Long]()
+
     var newNodes = 0
-    for (node <- graph.termNodes) {
-      val in = node.inEdges
-      val out = node.outEdges.values.toSeq
-      assert(in.size > 0 || out.size > 0)
+    for (node <- graph.getNodes; in = node.inEdgeIds.toArray; out = node.outEdgeIds.values.toArray
+         if in.size > 0 && out.size > 0) {
       val matrix = Array.tabulate(in.size, out.size) { (i, j) =>
-        pathsMap.get((in(i), out(j))).map(_.get).getOrElse(0)
+        pathsMap.get((graph.getEdge(in(i)), graph.getEdge(out(j)))).map(_.get).getOrElse(0)
       }
       val colLeft = new Array[Boolean](in.size)
       val colRight = new Array[Boolean](out.size)
@@ -193,49 +196,42 @@ object GraphSimplifier extends App {
           (l, r)
         }
         val (l, r) = dfsLeft(i)
+        if (r.size == 0) {
+          toRemove += in(i)
+        } else {
+          val newNode = graph.addNode(node.seq)
+          for (i <- l; e = in(i)) graph.replaceEnd(e, newNode)
+          for (i <- r; e = out(i)) graph.replaceStart(e, newNode)
+        }
         if (l.size > 0 && r.size > 0 && (l.size > 1 || r.size > 1)) {
           newNodes += 1
         }
       }
-      outf.println(node.seq + " -> " + matrix.deep.toString + " " + in.map(_.seq.size) + " " + out.map(_.seq.size).toList)
+      graph.removeNode(node)
+      toRemove ++= (0 until out.size).filterNot(colRight).map(out(_))
+      outf.println(node.seq + " -> " + matrix.deep.toString + " " + in.map(graph.getEdge(_).seq.size).toList + " " + out.map(graph.getEdge(_).seq.size).toList)
     }
-    
+
+    logger.info("Edges before: " + graph.getEdges.size)
+    toRemove.foreach(id => graph.removeEdge(graph.getEdge(id)))
+//    graph.simplifyGraph()
+    logger.info("Edges after: " + graph.getEdges.size)
+
+    val components = graph.components
+
+    logger.info("Total edges length: " + graph.getEdges.map(_.seq.length).sum)
+
+    val hist = components.groupBy(_.size).map(p => (p._1, p._2.size)).toSeq.sortBy(_._1)
+    logger.info("Components histogram: " + hist)
+
+    val hist2 = components.groupBy { comp =>
+      comp.flatMap(_.outEdges.values).map(_.seq.size).sum
+    }.map(p => (p._1, p._2.size)).toSeq.sortBy(_._1)
+    logger.info("Components histogram 2: " + hist2)
+
     outf.close()
 
     logger.info("New nodes count: " + newNodes)
   }
-  
-//  val edgesToRemove = edgeMap.filter{case (e, c) => c.get - e.seq.length <= cutoffAdd && e.seq.length <= 100}.map(_._1)
-//  logger.info("Total edges: " + graph.edges.size)
-//  logger.info("Edges to remove: " + edgesToRemove.size)
-//
-//  for (edge <- edgesToRemove) {
-//    edge.start.outEdges -= edge.seq(0)
-//    edge.end.inEdges = edge.end.inEdges.filterNot(_ == edge)
-//  }
-//
-//  logger.info("Terminal nodes before: " + graph.termNodes.size)
-//  for (node <- graph.termNodes) {
-//    val in = node.inEdges.size
-//    val out = node.outEdges.size
-//    if (in == 1 && out == 1) {
-//      graph.termKmers -= node.seq
-//      graph.nodeMap -= node.seq
-//      val e1 = node.inEdges.head
-//      val (_, e2) = node.outEdges.head
-//      val e = new Edge(e1.start, e2.end, e1.seq ++ e2.seq)
-//      e.start.outEdges += e.seq.head -> e
-//      e.end.inEdges = e.end.inEdges.map(ee => if (ee == e2) e else ee)
-//    }
-//  }
-//  graph.nodeMap.retain{case (seq, _) => graph.termKmers(seq)}
-//  logger.info("Terminal nodes after: " + graph.termNodes.size)
-//
-//  logger.info("Component sizes:" + graph.components.map(_.flatMap(_.outEdges.values).map(_.seq.size).sum).filter(_ != 0))
-//  val maxComponent = graph.components.maxBy(_.size)
-//  logger.info("Max component size: " + maxComponent.size)
-//  graph.retain(maxComponent)
-//  graph.write(outfile)
-//
-//  hist(DenseVector(edgeMap.filter((1000 to 1100) contains _._1.seq.size).values.map(_.get).toSeq: _*), 1000)
+
 }

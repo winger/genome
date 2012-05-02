@@ -3,6 +3,7 @@ package ru.ifmo.genome.scripts
 import java.io._
 import scala.App
 import ru.ifmo.genome.data._
+import graph.{MapGraph, Graph}
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
@@ -26,8 +27,10 @@ object GraphBuilder extends App {
   val kmers = kmersFreq.keySet
   logger.info("Good reads count: " + kmers.size)
 
-  val graph = Graph.buildGraph(k, kmers)
+  implicit val graph = Graph.buildGraph(k, kmers)
   val components = graph.components
+
+  logger.info("Total edges length: " + graph.getEdges.map(_.seq.length).sum)
 
   val hist = components.groupBy(_.size).map(p => (p._1, p._2.size)).toSeq.sortBy(_._1)
   logger.info("Components histogram: " + hist)
@@ -44,5 +47,5 @@ object GraphBuilder extends App {
   logger.info("Max component size: " + maxComponent.size)
   graph.retain(maxComponent)
 
-  graph.write(outfile)
+  graph.asInstanceOf[MapGraph].write(outfile)
 }

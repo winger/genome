@@ -13,6 +13,7 @@ import ru.ifmo.genome.dna.DNASeq.GenCanBuildFrom
  * @author Vladislav Isenbaev (vladislav.isenbaev@odnoklassniki.ru)
  */
 
+//TODO: add native serializators
 //TODO: optimize foreach/iterator/etc.
 abstract class DNASeq extends IndexedSeq[Base] with IndexedSeqLike[Base, DNASeq] with Serializable with MultiHash {
   override protected[this] def newBuilder = DNASeq.newBuilder
