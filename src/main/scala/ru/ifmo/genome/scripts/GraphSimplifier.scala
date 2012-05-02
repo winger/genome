@@ -8,13 +8,14 @@ import scala.collection.parallel.ParSeq
 import scala.collection.immutable.Range.Inclusive
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import scala.collection.mutable.PriorityQueue
 import scalala.library.Statistics._
 import scalala.library.Plotting._
 import scalala.tensor.sparse.SparseVector
 import scalala.tensor.dense.DenseVector
 import java.io._
 import scala._
+import collection.mutable.{ArrayBuffer, PriorityQueue}
+import scala.Predef._
 
 /**
 * Author: Vladislav Isenbaev (isenbaev@gmail.com)
@@ -88,10 +89,18 @@ object GraphSimplifier extends App {
     annPairs
   }
 
+  val deltas = ArrayBuffer[Int]()
+
   annPairs = annPairs flatMap { case pair@(positions1, positions2) =>
     val condition = positions1.exists {
       case EdgeGraphPosition(edge1, dist1) => positions2.exists {
-        case EdgeGraphPosition(edge2, dist2) => edge1 == edge2 && range.contains((dist2 - dist1) + k)
+        case EdgeGraphPosition(edge2, dist2) => {
+          val b = edge1 == edge2 && range.contains((dist2 - dist1) + k)
+          if (b) {
+            deltas += (dist2 - dist1) + k
+          }
+          b
+        }
         case _ => false
       }
       case _ => false
@@ -118,7 +127,7 @@ object GraphSimplifier extends App {
             (edge.start, dist)
         }
         val startEdge = pos1 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
-        val endEdge = pos1 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
+        val endEdge = pos2 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
         def dfs(node1: Node, dist1: Int, prevEdge: Edge): Int = {
           if (dist1 + dist2 + reachable(node2).getOrElse(node1, range.last + 1) > range.last) {
             0
@@ -164,51 +173,53 @@ object GraphSimplifier extends App {
 
     val toRemove = collection.mutable.Set[Long]()
 
-    var newNodes = 0
     for (node <- graph.getNodes; in = node.inEdgeIds.toArray; out = node.outEdgeIds.values.toArray
          if in.size > 0 && out.size > 0) {
       val matrix = Array.tabulate(in.size, out.size) { (i, j) =>
         pathsMap.get((graph.getEdge(in(i)), graph.getEdge(out(j)))).map(_.get).getOrElse(0)
       }
-      val colLeft = new Array[Boolean](in.size)
-      val colRight = new Array[Boolean](out.size)
-      for (i <- 0 until in.size if !colLeft(i)) {
-        def dfsLeft(i: Int): (Set[Int], Set[Int]) = {
-          assert(!colLeft(i))
-          colLeft(i) = true
-          var (l, r) = (Set(i), Set.empty[Int])
-          for (j <- 0 until out.size if !colRight(j) && matrix(i)(j) >= cutoff) {
-            val (l1, r1) = dfsRight(j)
-            l ++= l1
-            r ++= r1
-          }
-          (l, r)
-        }
-        def dfsRight(j: Int): (Set[Int], Set[Int]) = {
-          assert(!colRight(j))
-          colRight(j) = true
-          var (l, r) = (Set.empty[Int], Set(j))
-          for (i <- 0 until in.size if !colLeft(i) && matrix(i)(j) >= cutoff) {
-            val (l1, r1) = dfsLeft(i)
-            l ++= l1
-            r ++= r1
-          }
-          (l, r)
-        }
-        val (l, r) = dfsLeft(i)
-        if (r.size == 0) {
-          toRemove += in(i)
-        } else {
-          val newNode = graph.addNode(node.seq)
-          for (i <- l; e = in(i)) graph.replaceEnd(e, newNode)
-          for (i <- r; e = out(i)) graph.replaceStart(e, newNode)
-        }
-        if (l.size > 0 && r.size > 0 && (l.size > 1 || r.size > 1)) {
-          newNodes += 1
-        }
+      for (i <- 0 until in.size if (0 until out.size).forall(j => matrix(i)(j) < cutoff)) {
+        toRemove += in(i)
       }
-      graph.removeNode(node)
-      toRemove ++= (0 until out.size).filterNot(colRight).map(out(_))
+      for (j <- 0 until out.size if (0 until in.size).forall(i => matrix(i)(j) < cutoff)) {
+        toRemove += out(j)
+      }
+//      val colLeft = new Array[Boolean](in.size)
+//      val colRight = new Array[Boolean](out.size)
+//      for (i <- 0 until in.size if !colLeft(i)) {
+//        def dfsLeft(i: Int): (Set[Int], Set[Int]) = {
+//          assert(!colLeft(i))
+//          colLeft(i) = true
+//          var (l, r) = (Set(i), Set.empty[Int])
+//          for (j <- 0 until out.size if !colRight(j) && matrix(i)(j) >= cutoff) {
+//            val (l1, r1) = dfsRight(j)
+//            l ++= l1
+//            r ++= r1
+//          }
+//          (l, r)
+//        }
+//        def dfsRight(j: Int): (Set[Int], Set[Int]) = {
+//          assert(!colRight(j))
+//          colRight(j) = true
+//          var (l, r) = (Set.empty[Int], Set(j))
+//          for (i <- 0 until in.size if !colLeft(i) && matrix(i)(j) >= cutoff) {
+//            val (l1, r1) = dfsLeft(i)
+//            l ++= l1
+//            r ++= r1
+//          }
+//          (l, r)
+//        }
+//        val (l, r) = dfsLeft(i)
+//        if (r.size == 0) {
+//          toRemove += in(i)
+//        } else {
+//          val newNode = graph.addNode(node.seq)
+//          for (i <- l; e = in(i)) graph.replaceEnd(e, newNode)
+//          for (i <- r; e = out(i)) graph.replaceStart(e, newNode)
+//        }
+//      }
+//      graph.removeNode(node)
+//      toRemove ++= (0 until out.size).filterNot(colRight).map(out(_))
       outf.println(node.seq + " -> " + matrix.deep.toString + " " + in.map(graph.getEdge(_).seq.size).toList + " " + out.map(graph.getEdge(_).seq.size).toList)
     }
 
@@ -230,8 +241,8 @@ object GraphSimplifier extends App {
     logger.info("Components histogram 2: " + hist2)
 
     outf.close()
-
-    logger.info("New nodes count: " + newNodes)
   }
+
+  hist(DenseVector(deltas: _*), 100)
 
 }
