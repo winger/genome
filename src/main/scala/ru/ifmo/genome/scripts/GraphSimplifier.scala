@@ -32,7 +32,7 @@ object GraphSimplifier extends App {
   val outfile = new File(args(2))
 
   val range: Inclusive = 180 to 250
-  val cutoff = 75
+  val cutoff = 150
 
   val data = PairedEndData(datafile)
 
@@ -178,54 +178,48 @@ object GraphSimplifier extends App {
       val matrix = Array.tabulate(in.size, out.size) { (i, j) =>
         pathsMap.get((graph.getEdge(in(i)), graph.getEdge(out(j)))).map(_.get).getOrElse(0)
       }
-      for (i <- 0 until in.size if (0 until out.size).forall(j => matrix(i)(j) < cutoff)) {
-        toRemove += in(i)
+      val colLeft = new Array[Boolean](in.size)
+      val colRight = new Array[Boolean](out.size)
+      for (i <- 0 until in.size if !colLeft(i)) {
+        def dfsLeft(i: Int): (Set[Int], Set[Int]) = {
+          assert(!colLeft(i))
+          colLeft(i) = true
+          var (l, r) = (Set(i), Set.empty[Int])
+          for (j <- 0 until out.size if !colRight(j) && matrix(i)(j) >= cutoff) {
+            val (l1, r1) = dfsRight(j)
+            l ++= l1
+            r ++= r1
+          }
+          (l, r)
+        }
+        def dfsRight(j: Int): (Set[Int], Set[Int]) = {
+          assert(!colRight(j))
+          colRight(j) = true
+          var (l, r) = (Set.empty[Int], Set(j))
+          for (i <- 0 until in.size if !colLeft(i) && matrix(i)(j) >= cutoff) {
+            val (l1, r1) = dfsLeft(i)
+            l ++= l1
+            r ++= r1
+          }
+          (l, r)
+        }
+        val (l, r) = dfsLeft(i)
+        if (r.size == 0) {
+          toRemove += in(i)
+        } else {
+          val newNode = graph.addNode(node.seq)
+          for (i <- l; e = in(i)) graph.replaceEnd(e, newNode)
+          for (i <- r; e = out(i)) graph.replaceStart(e, newNode)
+        }
       }
-      for (j <- 0 until out.size if (0 until in.size).forall(i => matrix(i)(j) < cutoff)) {
-        toRemove += out(j)
-      }
-//      val colLeft = new Array[Boolean](in.size)
-//      val colRight = new Array[Boolean](out.size)
-//      for (i <- 0 until in.size if !colLeft(i)) {
-//        def dfsLeft(i: Int): (Set[Int], Set[Int]) = {
-//          assert(!colLeft(i))
-//          colLeft(i) = true
-//          var (l, r) = (Set(i), Set.empty[Int])
-//          for (j <- 0 until out.size if !colRight(j) && matrix(i)(j) >= cutoff) {
-//            val (l1, r1) = dfsRight(j)
-//            l ++= l1
-//            r ++= r1
-//          }
-//          (l, r)
-//        }
-//        def dfsRight(j: Int): (Set[Int], Set[Int]) = {
-//          assert(!colRight(j))
-//          colRight(j) = true
-//          var (l, r) = (Set.empty[Int], Set(j))
-//          for (i <- 0 until in.size if !colLeft(i) && matrix(i)(j) >= cutoff) {
-//            val (l1, r1) = dfsLeft(i)
-//            l ++= l1
-//            r ++= r1
-//          }
-//          (l, r)
-//        }
-//        val (l, r) = dfsLeft(i)
-//        if (r.size == 0) {
-//          toRemove += in(i)
-//        } else {
-//          val newNode = graph.addNode(node.seq)
-//          for (i <- l; e = in(i)) graph.replaceEnd(e, newNode)
-//          for (i <- r; e = out(i)) graph.replaceStart(e, newNode)
-//        }
-//      }
-//      graph.removeNode(node)
-//      toRemove ++= (0 until out.size).filterNot(colRight).map(out(_))
+      graph.removeNode(node)
+      toRemove ++= (0 until out.size).filterNot(colRight).map(out(_))
       outf.println(node.seq + " -> " + matrix.deep.toString + " " + in.map(graph.getEdge(_).seq.size).toList + " " + out.map(graph.getEdge(_).seq.size).toList)
     }
 
     logger.info("Edges before: " + graph.getEdges.size)
     toRemove.foreach(id => graph.removeEdge(graph.getEdge(id)))
-//    graph.simplifyGraph()
+    graph.simplifyGraph()
     logger.info("Edges after: " + graph.getEdges.size)
 
     val components = graph.components
