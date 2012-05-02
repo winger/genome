@@ -38,4 +38,4 @@ case class TerminalNode(var seq: DNASeq) extends Node {
 }
 
 @SerialVersionUID(1L)
-case class EdgeNode(seq: DNASeq, edges: List[(Edge, Int)]) extends Node
+case class EdgeNode(seq: DNASeq, edge: List[(Edge, Int)]) extends Node

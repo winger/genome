@@ -30,7 +30,7 @@ object GraphSimplifier extends App {
   val outfile = new File(args(2))
 
   val range: Inclusive = 180 to 250
-  val cutoffAdd = 75
+  val cutoff = 75
 
   val data = PairedEndData(datafile)
   
@@ -66,11 +66,10 @@ object GraphSimplifier extends App {
 
   logger.info("Reachable sets: " + reachable.map(_._2.size).sum)
 
-  var annPairs = {
-    val progress = new ConsoleProgress("annotate pairs", 80)
-    
+  var annPairs: Iterator[(Graph.Pos, Graph.Pos)] = {
+    lazy val progress = new ConsoleProgress("walk pairs", 80)
     var count = 0d
-    val ps = {
+    val annPairs = {
       for (chunk <- data.getPairs.grouped(1024)) yield {
         val chunkRes: ParSeq[Iterable[(Graph.Pos, Graph.Pos)]] = {
           for ((p1: DNASeq, p2: DNASeq) <- chunk.par if p1.length >= k && p2.length >= k) yield {
@@ -81,25 +80,15 @@ object GraphSimplifier extends App {
         }
         count += chunk.size
         progress(count / data.count)
-
         chunkRes.seq.flatten
       }
-    }.flatten.toList
-    
-    progress.done()
-    
-    ps.toSeq
+    }.flatten
+    annPairs
   }
-
-  logger.info("Pairs before: " + annPairs.size)
-
-  val distsHist = collection.mutable.HashMap[Long, Int]()
-
-  var skipped = 0
   
   annPairs = annPairs flatMap { case (pos1, pos2) =>
     if (pos1 == null || pos2 == null) {
-      skipped += 1
+      logger.warning("Skipped pair because of multiple locations")
       None
     } else {
       if (pos1.isRight && pos2.isRight) {
@@ -107,7 +96,6 @@ object GraphSimplifier extends App {
         val (edge2, dist2) = pos2.right.get
         val delta = (dist2 - dist1) + k
         if (edge1 == edge2 && range.contains(delta)) {
-          distsHist(delta) = distsHist.getOrElse(delta, 0) + 1
           None
         } else {
           Some((pos1, pos2))
@@ -118,24 +106,9 @@ object GraphSimplifier extends App {
     }
   }
 
-  if (skipped > 0) {
-    logger.warning("Skipped pairs: " + skipped)
-  }
-
-//  {
-//    val (x, y) = distsHist.unzip
-//    plot(DenseVector(x.toSeq: _*), DenseVector(y.toSeq: _*), '+')
-//    xlabel("dist")
-//    ylabel("count")
-//  }
-
-  
-  logger.info("Pairs after: " + annPairs.size)
-
   {
     import collection.JavaConversions._
     val pathsMap: collection.mutable.ConcurrentMap[(Edge, Edge), AtomicInteger] = new ConcurrentHashMap[(Edge, Edge), AtomicInteger]()
-    val progress = new ConsoleProgress("walk pairs", 80)
 
     var count = 0d
     for (chunk <- annPairs.grouped(1024)) {
@@ -182,13 +155,11 @@ object GraphSimplifier extends App {
         }
       }
       count += chunk.size
-      progress(count / annPairs.size)
     }
-
-    progress.done()
     
     val outf = new PrintWriter(new FileWriter(outfile))
 
+    var newNodes = 0
     for (node <- graph.termNodes) {
       val in = node.inEdges
       val out = node.outEdges.values.toSeq
@@ -196,10 +167,42 @@ object GraphSimplifier extends App {
       val matrix = Array.tabulate(in.size, out.size) { (i, j) =>
         pathsMap.get((in(i), out(j))).map(_.get).getOrElse(0)
       }
+      val colLeft = new Array[Boolean](in.size)
+      val colRight = new Array[Boolean](out.size)
+      for (i <- 0 until in.size if !colLeft(i)) {
+        def dfsLeft(i: Int): (Set[Int], Set[Int]) = {
+          assert(!colLeft(i))
+          colLeft(i) = true
+          var (l, r) = (Set(i), Set.empty[Int])
+          for (j <- 0 until out.size if !colRight(j) && matrix(i)(j) >= cutoff) {
+            val (l1, r1) = dfsRight(j)
+            l ++= l1
+            r ++= r1
+          }
+          (l, r)
+        }
+        def dfsRight(j: Int): (Set[Int], Set[Int]) = {
+          assert(!colRight(j))
+          colRight(j) = true
+          var (l, r) = (Set.empty[Int], Set(j))
+          for (i <- 0 until in.size if !colLeft(i) && matrix(i)(j) >= cutoff) {
+            val (l1, r1) = dfsLeft(i)
+            l ++= l1
+            r ++= r1
+          }
+          (l, r)
+        }
+        val (l, r) = dfsLeft(i)
+        if (l.size > 0 && r.size > 0 && (l.size > 1 || r.size > 1)) {
+          newNodes += 1
+        }
+      }
       outf.println(node.seq + " -> " + matrix.deep.toString + " " + in.map(_.seq.size) + " " + out.map(_.seq.size).toList)
     }
     
     outf.close()
+
+    logger.info("New nodes count: " + newNodes)
   }
   
 //  val edgesToRemove = edgeMap.filter{case (e, c) => c.get - e.seq.length <= cutoffAdd && e.seq.length <= 100}.map(_._1)
