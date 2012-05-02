@@ -13,19 +13,19 @@ import com.esotericsoftware.kryo.util.ObjectMap
  */
 
 @SerialVersionUID(1L)
-class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collection.mutable.Map[DNASeq, Node]) extends KryoSerializable {
+class Graph(val termNodes: collection.mutable.Set[TerminalNode], val nodeMap: collection.mutable.Map[DNASeq, Node]) extends KryoSerializable {
   import Graph._
   import formatter._
   
   //TODO make external serializator
-  private def this() = this(collection.mutable.Set[DNASeq](), collection.mutable.Map[DNASeq, Node]()) // for serialization only
+  private def this() = this(collection.mutable.Set[TerminalNode](), collection.mutable.Map[DNASeq, Node]()) // for serialization only
 
   def retain(nodes: Seq[TerminalNode]) {
-    val set = nodes.map(_.seq).toSet
-    termKmers.retain(set)
+    val set = nodes.toSet
+    termNodes.retain(set)
     def retain(node: Node): Boolean = node match {
-      case TerminalNode(seq) => set.contains(seq)
-      case EdgeNode(_, from, _, _) => retain(from)
+      case tNode: TerminalNode => set.contains(tNode)
+      case _ => false
     }
     nodeMap.retain((_, node) => retain(node))
   }
@@ -47,13 +47,13 @@ class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collecti
       visited
     }
 
-    for (read <- termKmers.toSeq; node = nodeMap(read).asInstanceOf[TerminalNode] if !col(node))
+    for (node <- termNodes.toSeq if !col(node))
       yield dfs(node)
   }
 
   def writeDot(out: PrintWriter) {
     out.println("digraph G {")
-    for (kmer <- termKmers; node = nodeMap(kmer).asInstanceOf[TerminalNode]; edge <- node.outEdges.values) {
+    for (node <- termNodes; edge <- node.outEdges.values) {
       out.println("%s -> %s [label=%d]".format(edge.start.seq, edge.end.seq, edge.seq.length))
     }
     out.println("}")
@@ -64,23 +64,22 @@ class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collecti
 
   def getPos(n: Node): Graph.Pos = n match {
     case n@TerminalNode(_) => Left(n)
-    case EdgeNode(_, from, base, dist) => getPos(from) match {
-      case Left(tNode) => Right((tNode.outEdges(base), dist))
-      case Right((edge, d1)) => Right((edge, d1 + dist))
-    }
+    case EdgeNode(_, es) if es.size == 1 => Right(es(0))
+    case _ => null
   }
 
-  def edges = termKmers.flatMap(x => nodeMap(x).asInstanceOf[TerminalNode].outEdges.values).toSeq
-
-  def termNodes = termKmers.map(nodeMap(_).asInstanceOf[TerminalNode])
+  def edges = termNodes.flatMap(node => node.outEdges.values).toSeq
 
   def rebuild() {
+    nodeMap.clear()
+    for (node <- termNodes) nodeMap(node.seq) = node
     for (edge <- edges) {
       val start = edge.seq.head
       var seq = edge.start.seq.drop(1) :+ start
       var dist = 1
       for (base <- edge.seq.tail) {
-        nodeMap(seq) = new EdgeNode(seq, edge.start, start, dist)
+        val prev = nodeMap.get(seq) map {case EdgeNode(_, list) => list} getOrElse Nil
+        nodeMap(seq) = new EdgeNode(seq, (edge, dist) :: prev)
         seq = seq.drop(1) :+ base
         dist += 1
       }
@@ -95,12 +94,11 @@ class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collecti
   }
 
   def write(kryo: Kryo, out: Output) {
-    for (seq <- termKmers; node = nodeMap(seq).asInstanceOf[TerminalNode]) {
+    for (node <- termNodes) {
       kryo.writeObjectOrNull(out, node)
     }
     kryo.writeClassAndObject(out, null)
-    for (seq <- termKmers; node = nodeMap(seq).asInstanceOf[TerminalNode];
-         edge <- node.outEdges.values) {
+    for (edge <- edges) {
       kryo.writeObjectOrNull(out, edge)
     }
     kryo.writeClassAndObject(out, null)
@@ -110,8 +108,8 @@ class Graph(val termKmers: collection.mutable.Set[DNASeq], val nodeMap: collecti
     var count = 0
     for (node <- Iterator.continually(kryo.readObjectOrNull(in, classOf[TerminalNode])).takeWhile(_ != null)) {
       count += 1
+      termNodes += node
       nodeMap(node.seq) = node
-      termKmers += node.seq
     }
     kryo.getGraphContext.asInstanceOf[ObjectMap[Class[_], AnyRef]].put(classOf[Graph], this)
     Iterator.continually(kryo.readObjectOrNull(in, classOf[Edge])).takeWhile(_ != null).size
@@ -124,7 +122,7 @@ object Graph {
   val (logger, formatter) = ZeroLoggerFactory.newLogger(Graph)
   import formatter._
 
-  type Pos = Either[TerminalNode, (Edge, Long)]
+  type Pos = Either[TerminalNode, (Edge, Int)]
 
   val chunkSize = 1024
 
@@ -174,7 +172,7 @@ object Graph {
         var seq = read.drop(1) :+ base
         var length = 1
         while (!nodeMap.contains(seq)) {
-          nodeMap(seq) = new EdgeNode(seq, node, base, length)
+          nodeMap(seq) = new EdgeNode(seq, Nil)
           val out = outcoming(seq)
           assert(out.size == 1, seq + " " + out.toSeq)
           builder += out(0)
@@ -216,7 +214,7 @@ object Graph {
 
     logger.info("Graph nodes: " + nodeMap.size)
 
-    new Graph(HashSet[DNASeq]() ++ termKmers, nodeMap)
+    new Graph((HashSet[DNASeq]() ++ termKmers).map(nodeMap(_).asInstanceOf[TerminalNode]), nodeMap)
   }
   
   def apply(file: File): Graph = {

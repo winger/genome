@@ -35,7 +35,7 @@ object GraphSimplifier extends App {
   val data = PairedEndData(datafile)
   
   val graph = Graph(infile)
-  val k = graph.termKmers.head.length
+  val k = graph.termNodes.head.seq.length
   logger.info("K = " + k)
   logger.info("Graph nodes: " + graph.nodeMap.size)
   
@@ -94,21 +94,32 @@ object GraphSimplifier extends App {
   logger.info("Pairs before: " + annPairs.size)
 
   val distsHist = collection.mutable.HashMap[Long, Int]()
+
+  var skipped = 0
   
   annPairs = annPairs flatMap { case (pos1, pos2) =>
-    if (pos1.isRight && pos2.isRight) {
-      val (edge1, dist1) = pos1.right.get
-      val (edge2, dist2) = pos2.right.get
-      val delta = (dist2 - dist1) + k
-      if (edge1 == edge2 && range.contains(delta)) {
-        distsHist(delta) = distsHist.getOrElse(delta, 0) + 1
-        None
+    if (pos1 == null || pos2 == null) {
+      skipped += 1
+      None
+    } else {
+      if (pos1.isRight && pos2.isRight) {
+        val (edge1, dist1) = pos1.right.get
+        val (edge2, dist2) = pos2.right.get
+        val delta = (dist2 - dist1) + k
+        if (edge1 == edge2 && range.contains(delta)) {
+          distsHist(delta) = distsHist.getOrElse(delta, 0) + 1
+          None
+        } else {
+          Some((pos1, pos2))
+        }
       } else {
         Some((pos1, pos2))
       }
-    } else {
-      Some((pos1, pos2))
     }
+  }
+
+  if (skipped > 0) {
+    logger.warning("Skipped pairs: " + skipped)
   }
 
 //  {
@@ -122,7 +133,8 @@ object GraphSimplifier extends App {
   logger.info("Pairs after: " + annPairs.size)
 
   {
-
+    import collection.JavaConversions._
+    val pathsMap: collection.mutable.ConcurrentMap[(Edge, Edge), AtomicInteger] = new ConcurrentHashMap[(Edge, Edge), AtomicInteger]()
     val progress = new ConsoleProgress("walk pairs", 80)
 
     var count = 0d
@@ -130,38 +142,41 @@ object GraphSimplifier extends App {
       for ((pos1, pos2) <- chunk.par) {
         var pathEdges = collection.mutable.Set[(Edge, Edge)]()
         val (node2, dist2) = pos2 match {
-          case Left(n) => (n, 0L)
+          case Left(n) => (n, 0)
           case Right((edge, dist)) =>
-            pathEdges += edge
             (edge.start, dist)
         }
-        def dfs(node1: TerminalNode, dist1: Long): Int = {
+        val startEdge = pos1.fold(_ => null, _._1)
+        val endEdge = pos2.fold(_ => null, _._1)
+        def dfs(node1: TerminalNode, dist1: Long, prevEdge: Edge): Int = {
           if (dist1 + dist2 + reachable(node2).getOrElse(node1, range.last + 1) > range.last) {
             0
           } else {
-            val cur = if (node1 == node2 && range.contains(dist1 + dist2)) 1 else 0
+            val cur = if (node1 == node2 && range.contains(dist1 + dist2)) {
+              if (prevEdge != null && endEdge != null) {
+                pathEdges += prevEdge -> endEdge
+              }
+              1
+            } else 0
             cur + node1.outEdges.values.map { e =>
-              val count = dfs(e.end, dist1 + e.seq.length)
-              if (count > 0) {
-                pathEdges += e
+              val count = dfs(e.end, dist1 + e.seq.length, e)
+              if (count > 0 && prevEdge != null) {
+                pathEdges += prevEdge -> e
               }
               count
             }.sum
           }
         }
         val (node0, dist0) = pos1 match {
-          case Left(n) => (n, 0L)
+          case Left(n) => (n, 0)
           case Right((edge, dist)) =>
-            pathEdges += edge
             (edge.end, edge.seq.length - dist)
         }
-        val paths = dfs(node0, dist0)
-        for (edge <- pathEdges) {
+        val paths = dfs(node0, dist0, startEdge)
+        for (es <- pathEdges) {
           val counter = {
-            if (!edgeMap.contains(edge)) {
-              edgeMap.putIfAbsent(edge, new AtomicInteger())
-            }
-            edgeMap(edge)
+            if (!pathsMap.contains(es)) pathsMap.putIfAbsent(es, new AtomicInteger())
+            pathsMap(es)
           }
           counter.incrementAndGet()
         }
@@ -171,39 +186,53 @@ object GraphSimplifier extends App {
     }
 
     progress.done()
+    
+    val outf = new PrintWriter(new FileWriter(outfile))
+
+    for (node <- graph.termNodes) {
+      val in = node.inEdges
+      val out = node.outEdges.values.toSeq
+      assert(in.size > 0 || out.size > 0)
+      val matrix = Array.tabulate(in.size, out.size) { (i, j) =>
+        pathsMap.get((in(i), out(j))).map(_.get).getOrElse(0)
+      }
+      outf.println(node.seq + " -> " + matrix.deep.toString + " " + in.map(_.seq.size) + " " + out.map(_.seq.size).toList)
+    }
+    
+    outf.close()
   }
   
-  val edgesToRemove = edgeMap.filter{case (e, c) => c.get - e.seq.length <= cutoffAdd && e.seq.length <= 100}.map(_._1)
-  logger.info("Total edges: " + graph.edges.size)
-  logger.info("Edges to remove: " + edgesToRemove.size)
-
-  for (edge <- edgesToRemove) {
-    edge.start.outEdges -= edge.seq(0)
-    edge.end.inEdges = edge.end.inEdges.filterNot(_ == edge)
-  }
-
-  logger.info("Terminal nodes before: " + graph.termNodes.size)
-  for (node <- graph.termNodes) {
-    val in = node.inEdges.size
-    val out = node.outEdges.size
-    if (in == 1 && out == 1) {
-      graph.termKmers -= node.seq
-      graph.nodeMap -= node.seq
-      val e1 = node.inEdges.head
-      val (_, e2) = node.outEdges.head
-      val e = new Edge(e1.start, e2.end, e1.seq ++ e2.seq)
-      e.start.outEdges += e.seq.head -> e
-      e.end.inEdges = e.end.inEdges.map(ee => if (ee == e2) e else ee)
-    }
-  }
-  graph.nodeMap.retain{case (seq, _) => graph.termKmers(seq)}
-  logger.info("Terminal nodes after: " + graph.termNodes.size)
-
-  logger.info("Component sizes:" + graph.components.map(_.flatMap(_.outEdges.values).map(_.seq.size).sum).filter(_ != 0))
-  val maxComponent = graph.components.maxBy(_.size)
-  logger.info("Max component size: " + maxComponent.size)
-  graph.retain(maxComponent)
-  graph.write(outfile)
-
-  hist(DenseVector(edgeMap.filter((1000 to 1100) contains _._1.seq.size).values.map(_.get).toSeq: _*), 1000)
+//  val edgesToRemove = edgeMap.filter{case (e, c) => c.get - e.seq.length <= cutoffAdd && e.seq.length <= 100}.map(_._1)
+//  logger.info("Total edges: " + graph.edges.size)
+//  logger.info("Edges to remove: " + edgesToRemove.size)
+//
+//  for (edge <- edgesToRemove) {
+//    edge.start.outEdges -= edge.seq(0)
+//    edge.end.inEdges = edge.end.inEdges.filterNot(_ == edge)
+//  }
+//
+//  logger.info("Terminal nodes before: " + graph.termNodes.size)
+//  for (node <- graph.termNodes) {
+//    val in = node.inEdges.size
+//    val out = node.outEdges.size
+//    if (in == 1 && out == 1) {
+//      graph.termKmers -= node.seq
+//      graph.nodeMap -= node.seq
+//      val e1 = node.inEdges.head
+//      val (_, e2) = node.outEdges.head
+//      val e = new Edge(e1.start, e2.end, e1.seq ++ e2.seq)
+//      e.start.outEdges += e.seq.head -> e
+//      e.end.inEdges = e.end.inEdges.map(ee => if (ee == e2) e else ee)
+//    }
+//  }
+//  graph.nodeMap.retain{case (seq, _) => graph.termKmers(seq)}
+//  logger.info("Terminal nodes after: " + graph.termNodes.size)
+//
+//  logger.info("Component sizes:" + graph.components.map(_.flatMap(_.outEdges.values).map(_.seq.size).sum).filter(_ != 0))
+//  val maxComponent = graph.components.maxBy(_.size)
+//  logger.info("Max component size: " + maxComponent.size)
+//  graph.retain(maxComponent)
+//  graph.write(outfile)
+//
+//  hist(DenseVector(edgeMap.filter((1000 to 1100) contains _._1.seq.size).values.map(_.get).toSeq: _*), 1000)
 }
