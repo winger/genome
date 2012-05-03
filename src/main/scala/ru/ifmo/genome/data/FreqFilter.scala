@@ -53,8 +53,6 @@ object FreqFilter {
 
     progress.done()
 
-    logger.info("Filter false-positives: " + kmersFreq.count(_._2 < rounds))
-
     kmersFreq.filter(_._2 >= rounds)
   }
 

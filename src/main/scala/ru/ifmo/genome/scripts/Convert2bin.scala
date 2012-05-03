@@ -38,9 +38,9 @@ object Convert2bin extends App {
     }
 
     def filtered(withQ: Seq[(Char, Char)]): DNASeq = {
-      val filtered1 = withQ.takeWhile(p => Base.fromChar.contains(p._1))
-      val (s1, s2) = filtered1.splitAt(k)
-      val filtered = s1 ++ s2.takeWhile(p => p._2 - '!' >= 20)
+      val filtered = withQ.takeWhile(p => Base.fromChar.contains(p._1))
+//      val (s1, s2) = filtered1.splitAt(k)
+//      val filtered = s1 ++ s2.takeWhile(p => p._2 - '!' >= 20)
       val seq = DNASeq(filtered.map(p => Base.fromChar(p._1)): _*)
       if (filtered.length >= k) {
         kmers += filtered.length - k + 1

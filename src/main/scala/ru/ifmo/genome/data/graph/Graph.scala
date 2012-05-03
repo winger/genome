@@ -6,9 +6,11 @@ import java.io._
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentHashMap
 import scala.collection._
+import mutable.ArrayBuffer
 import ru.ifmo.genome.dna.{DNASeq, Base}
 import com.esotericsoftware.kryo.{Kryo, KryoSerializable}
 import scala.{Long, collection, Int}
+import ru.ifmo.genome.ds.DNAMap
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
@@ -53,17 +55,31 @@ trait Graph {
   def writeDot(out: PrintWriter) {
     out.println("digraph G {")
     for (edge <- getEdges) {
-      out.println("%s -> %s [label=%d]".format(edge.startId, edge.endId, edge.seq.length))
+      val label = {
+        if (edge.seq.length <= 50) {
+          edge.seq.toString
+        } else {
+          edge.seq.length.toString
+        }
+      }
+      out.println("%s -> %s [label=%s]".format(edge.startId, edge.endId, label))
     }
     out.println("}")
     out.close()
   }
 
-  def getGraphMap: Map[DNASeq, List[GraphPosition]] = {
-    val nodeMap = mutable.Map[DNASeq, List[GraphPosition]]()
+  def getGraphMap: DNAMap[ArrayBuffer[GraphPosition]] = {
+    val n = getNodes.size + getEdges.map(_.seq.size).sum
+    val k = getNodes.head.seq.size.toByte
+    val nodeMap = new DNAMap[ArrayBuffer[GraphPosition]](k, n)
     def add(seq: DNASeq, pos: GraphPosition) {
-      nodeMap(seq) = pos :: nodeMap.getOrElse(seq, Nil)
+      nodeMap.get(seq) match {
+        case None => nodeMap.put(seq, ArrayBuffer(pos))
+        case Some(ar) => ar += pos
+      }
     }
+    val total = getEdges.map(_.seq.size).sum + getNodes.size
+    val progress = new ConsoleProgress("Node map", 80)
     for (node <- getNodes) {
       add(node.seq, new NodeGraphPosition(node))
     }
@@ -76,8 +92,28 @@ trait Graph {
         seq = seq.drop(1) :+ base
         dist += 1
       }
+      progress(nodeMap.size.toDouble / total)
     }
+    progress.done()
     nodeMap
+  }
+
+  private def similar(a: DNASeq, b: DNASeq) = {
+    math.abs(a.length - b.length) < 5 //TODO fix this
+  }
+  
+  def removeBubbles() {
+    //TODO store bubble info
+    for (node <- getNodes) {
+      val out = node.outEdges.values.toArray
+      var toRemove = Set[Edge]()
+      for (i <- 0 until out.size if !toRemove(out(i)); j <- i + 1 until out.size) {
+        if (out(i).end == out(j).end && similar(out(i).seq, out(j).seq)) {
+          toRemove += out(j)
+        }
+      }
+      toRemove.foreach(removeEdge)
+    }
   }
 }
 
@@ -196,7 +232,8 @@ object Graph {
 
   val chunkSize = 1024
 
-  def buildGraph(k: Int, kmers: collection.Set[DNASeq]) = {
+  def buildGraph(k: Int, kmersFreq : collection.Map[DNASeq, Int]) = {
+    var kmers = kmersFreq.keySet.toSet
 
     def contains(x: DNASeq) = kmers.contains(x) || kmers.contains(x.revComplement)
 
@@ -211,6 +248,42 @@ object Graph {
         base
       }
     }
+
+//    val restoreDepth = 2
+//    def restore(kmer: DNASeq, depth: Int = 0): (Boolean, Set[DNASeq]) = {
+//      if (depth > 0 && (kmers(kmer) || kmers(kmer.revComplement))) {
+//        (true, Set.empty[DNASeq])
+//      } else {
+//        var found = false
+//        var set = Set.empty[DNASeq]
+//        if (depth < restoreDepth && (kmersFreq.contains(kmer) || kmersFreq.contains(kmer.revComplement))) {
+//          for (base <- Base.fromInt) {
+//            val kmer1 = kmer.drop(1) :+ base
+//            val (found1, set1) = restore(kmer1, depth + 1)
+//            found |= found1
+//            set ++= set1
+//          }
+//        }
+//        if (found) set += kmer
+//        (found, set)
+//      }
+//    }
+//    val restoredKmers = {
+//      val progress = new ConsoleProgress("restoring kmers", 80)
+//      var count = 0d
+//      for (chunk <- kmers.grouped(1024)) yield {
+//        val set = for (kmer <- chunk.par) yield {
+//          val (_, set) = restore(kmer, 0)
+//          set
+//        }
+//        count += chunk.size
+//        progress(count / kmers.size)
+//        set.seq.flatten
+//      }
+//    }.flatten.toSet
+//    logger.info("Restored kmers: " + restoredKmers.size)
+//
+//    kmers ++= restoredKmers
 
     val termKmers = {
       val t = kmers.par.filter {

@@ -8,6 +8,7 @@ import java.util.Arrays
 import collection.{GenSeqLike, IndexedSeqLike}
 import collection.generic.{SeqFactory, CanBuildFrom}
 import ru.ifmo.genome.dna.DNASeq.GenCanBuildFrom
+import java.nio.ByteBuffer
 
 /**
  * @author Vladislav Isenbaev (vladislav.isenbaev@odnoklassniki.ru)
@@ -23,6 +24,8 @@ abstract class DNASeq extends IndexedSeq[Base] with IndexedSeqLike[Base, DNASeq]
 
   def complement: DNASeq = map(_.complement)
   def revComplement: DNASeq = complement.reverse
+  
+  def write(buf: ByteBuffer, pos: Int)
 
   override def multiHashCode(seed: Int) = {
     val murmur = new MurmurHash[Base](seed)
@@ -50,6 +53,10 @@ class ArrayDNASeq(val data: Array[Byte], val length: Int) extends DNASeq {
     val murmur = new MurmurHash[Byte](seed)
     data.foreach(murmur)
     murmur.hash
+  }
+  
+  def write(buf: ByteBuffer, pos: Int) {
+    for(i <- 0 until data.length) buf.put(pos + i, data(i))
   }
 
   //optimizations
@@ -81,6 +88,10 @@ class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
       ar(i) = (long >> (8 * i)).toByte
     }
     ar
+  }
+
+  def write(buf: ByteBuffer, pos: Int) {
+    buf.putLong(pos, long)
   }
 
   //optimizations
@@ -176,6 +187,11 @@ class Long2DNASeq(val long1: Long, val long2: Long, val len: Byte) extends DNASe
       ar(i) = (long >> (8 * (i % 8))).toByte
     }
     ar
+  }
+
+  def write(buf: ByteBuffer, pos: Int) {
+    buf.putLong(pos, long1)
+    buf.putLong(pos + 8, long2)
   }
 
   //optimizations
@@ -278,6 +294,20 @@ object DNASeq {
       }
     } else {
       new ArrayDNASeq(ar, length)
+    }
+  }
+  
+  def read(buf: ByteBuffer, pos: Int, k: Byte): DNASeq = {
+    if (k <= 32) {
+      new Long1DNASeq(buf.getLong(pos), k)
+    } else if (k <= 64) {
+      new Long2DNASeq(buf.getLong(pos), buf.getLong(pos + 8), k)
+    } else {
+      val ar = new Array[Byte]((k + 3) / 4)
+      for (i <- 0 until ar.length) {
+        ar(i) = buf.get(pos + i)
+      }
+      new ArrayDNASeq(ar, k)
     }
   }
   
