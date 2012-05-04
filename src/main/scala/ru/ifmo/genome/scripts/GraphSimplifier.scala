@@ -14,7 +14,7 @@ import scalala.tensor.sparse.SparseVector
 import scalala.tensor.dense.DenseVector
 import java.io._
 import scala._
-import collection.mutable.PriorityQueue
+import collection.mutable.{SynchronizedMap, PriorityQueue}
 import scala.Predef._
 
 /**
@@ -30,17 +30,17 @@ object GraphSimplifier extends App {
   val infile = new File(args(0))
   val datafile = new File(args(1))
   val outfile = new File(args(2))
+  val graphfile = new File(args(3))
 
   val range: Inclusive = 180 to 250
 //  val range: Inclusive = 160 to 270
-  val cutoff = 50
+  val cutoff = 200
 
   val data = PairedEndData(datafile)
 
   implicit val graph = Graph(infile)
   val k = graph.getNodes.head.seq.length
   logger.info("K = " + k)
-  logger.info("Graph nodes: " + graph.getNodes.size)
 
   for (it <- 0 until 5) {
     System.gc()
@@ -57,32 +57,36 @@ object GraphSimplifier extends App {
       }
     }
 
-    val reachable: collection.Map[(Node, Node), Int] = {
-      for (node <- graph.getNodes.par) yield {
+    val cache = new collection.mutable.HashMap[Node, collection.Map[Node, Int]]() with SynchronizedMap[Node, collection.Map[Node, Int]]
+    def reachable(node: Node): collection.Map[Node, Int] = {
+      if (cache.contains(node)) {
+        cache(node)
+      } else {
         var queue = new PriorityQueue[(Int, Node)]()(new Ordering[(Int, Node)]{
           def compare(x: (Int, Node), y: (Int, Node)): Int = {
             y._1 - x._1
           }
         })
-        var set = collection.immutable.Map[Node, Int]()
+        var set = collection.mutable.Map[Node, Int]()
         queue += 0 -> node
         while (!queue.isEmpty) {
           val (dist, u) = queue.dequeue()
           if (!set.contains(u)) {
             set += u -> dist
             for (edge <- u.inEdges) {
-              val dist2 = dist + u.seq.length
+              val dist2 = dist + edge.seq.length
               if (dist2 <= range.last) {
                 queue += dist2 -> edge.start
               }
             }
           }
         }
-        set.map{case (node1, dist) => (node, node1) -> dist}
+        if (cache.size < 50000) {
+          cache += node -> set
+        }
+        set
       }
-    }.seq.flatten.toMap
-  
-    logger.info("Reachable sets: " + reachable.size)
+    }
   
     val graphMap = graph.getGraphMap
 
@@ -101,8 +105,10 @@ object GraphSimplifier extends App {
               if (!graphMap.contains(p2.take(k)) || !graphMap.contains(p1.take(k).revComplement)) {
                 notFoundPairs2 += 1
               }
-              (graphMap.get(p1.take(k)) zip graphMap.get(p2.take(k).revComplement)) ++
-              (graphMap.get(p2.take(k)) zip graphMap.get(p1.take(k).revComplement))
+              Iterable(
+                (graphMap.getAll(p1.take(k)), graphMap.getAll(p2.take(k).revComplement)),
+                (graphMap.getAll(p2.take(k)), graphMap.getAll(p1.take(k).revComplement))
+              )
             }
           }
           count += chunk.size
@@ -129,48 +135,59 @@ object GraphSimplifier extends App {
     }
   
     {
+      var reachables = 0d
+
       import scala.collection.JavaConversions._
       val pathsMap: collection.mutable.ConcurrentMap[(Edge, Edge), AtomicInteger] = new ConcurrentHashMap[(Edge, Edge), AtomicInteger]()
   
       var count = 0d
       var badPairs = 0
       for (chunk <- annPairs.grouped(1024)) {
-        for ((positions1, positions2) <- chunk.par; pos1 <- positions1; pos2 <- positions2) {
+        for ((positions1, positions2) <- chunk.par) {
           var pathEdges = collection.mutable.Set[(Edge, Edge)]()
-          val (node2, dist2) = pos2 match {
-            case NodeGraphPosition(n) => (n, 0)
-            case EdgeGraphPosition(edge, dist) =>
-              (edge.start, dist)
-          }
-          val startEdge = pos1 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
-          val endEdge = pos2 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
-          def dfs(node1: Node, dist1: Int, prevEdge: Edge): Int = {
-            if (dist1 + dist2 + reachable.getOrElse((node2, node1), range.last + 1) > range.last) {
-              0
-            } else {
-              val cur = if (node1 == node2 && range.contains(dist1 + dist2)) {
-                if (prevEdge != null && endEdge != null) {
-                  pathEdges += prevEdge -> endEdge
-                }
-                1
-              } else 0
-              cur + node1.outEdges.values.map { e =>
-                val count = dfs(e.end, dist1 + e.seq.length, e)
-                if (count > 0 && prevEdge != null) {
-                  pathEdges += prevEdge -> e
-                }
-                count
-              }.sum
+          val pairs = for (pos1 <- positions1; pos2 <- positions2) yield (pos1, pos2)
+          var good = false
+          pairs.foreach{ case (pos1, pos2) =>
+            val (node2, dist2) = pos2 match {
+              case NodeGraphPosition(n) => (n, 0)
+              case EdgeGraphPosition(edge, dist) =>
+                (edge.start, dist)
             }
-          }
-          val (node0, dist0) = pos1 match {
-            case NodeGraphPosition(n) => (n, 0)
-            case EdgeGraphPosition(edge, dist) =>
-              (edge.end, edge.seq.length - dist)
-          }
-          val paths = dfs(node0, dist0, startEdge)
-          if (paths == 0) {
-            badPairs += 1
+            val startEdge = pos1 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
+            val endEdge = pos2 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
+            val reachableSet = reachable(node2)
+            reachables += reachableSet.size
+            val memo = collection.mutable.Map[(Edge, Int), Boolean]()
+            def dfs(node1: Node, dist1: Int, prevEdge: Edge): Boolean = {
+              if (memo.contains((prevEdge, dist1 / 5))) {
+                memo((prevEdge, dist1 / 5))
+              } else if (dist1 + dist2 + reachableSet.getOrElse(node1, range.last + 1) > range.last) {
+                false
+              } else {
+                var cur = if (node1 == node2 && range.contains(dist1 + dist2)) {
+                  if (prevEdge != null && endEdge != null) {
+                    pathEdges += prevEdge -> endEdge
+                  }
+                  true
+                } else false
+                node1.outEdges.values.foreach { e =>
+                  val res = dfs(e.end, dist1 + e.seq.length, e)
+                  if (res && prevEdge != null) {
+                    pathEdges += prevEdge -> e
+                  }
+                  cur |= res
+                }
+                memo((prevEdge, dist1 / 5)) = cur
+                cur
+              }
+            }
+            val (node0, dist0) = pos1 match {
+              case NodeGraphPosition(n) => (n, 0)
+              case EdgeGraphPosition(edge, dist) =>
+                (edge.end, edge.seq.length - dist)
+            }
+            val paths = dfs(node0, dist0, startEdge)
+            good |= paths
           }
           for (es <- pathEdges) {
             val counter = {
@@ -178,6 +195,9 @@ object GraphSimplifier extends App {
               pathsMap(es)
             }
             counter.incrementAndGet()
+          }
+          if (!good) {
+            badPairs += 1
           }
         }
         count += chunk.size
@@ -188,7 +208,7 @@ object GraphSimplifier extends App {
   
       val outf = new PrintWriter(new FileWriter(outfile))
   
-      val toRemove = collection.mutable.Map[Long, Int]()
+      val toRemove = collection.mutable.Set[Long]()
   
       for (node <- graph.getNodes; in = node.inEdgeIds.toArray; out = node.outEdgeIds.values.toArray
            if in.size > 0 && out.size > 0) {
@@ -222,21 +242,19 @@ object GraphSimplifier extends App {
           }
           val (l, r) = dfsLeft(i)
           if (r.size == 0) {
-            toRemove(in(i)) = toRemove.getOrElse(in(i), 0) + 1
+            toRemove += in(i)
           } else {
             val newNode = graph.addNode(node.seq)
             for (i <- l; e = in(i)) graph.replaceEnd(e, newNode)
             for (i <- r; e = out(i)) graph.replaceStart(e, newNode)
           }
         }
-        for (edgeId <- (0 until out.size).filterNot(colRight).map(out(_))) {
-          toRemove(edgeId) = toRemove.getOrElse(edgeId, 0) + 1
-        }
-        outf.println(node.seq + " -> " + matrix.deep.toString + " " + in.map(graph.getEdge(_).seq.size).toList + " " + out.map(graph.getEdge(_).seq.size).toList)
+        toRemove ++= (0 until out.size).filterNot(colRight).map(out(_))
+        outf.println(node.id + " -> " + matrix.deep.toString + " " + in.map(graph.getEdge(_).seq.size).toList + " " + out.map(graph.getEdge(_).seq.size).toList)
       }
   
       logger.info("Edges before: " + graph.getEdges.size)
-      toRemove.iterator.collect{case (edgeId, 2) => edgeId}.foreach(id => graph.removeEdge(graph.getEdge(id)))
+      toRemove.foreach(id => graph.removeEdge(graph.getEdge(id)))
       graph.removeBubbles()
       graph.simplifyGraph()
       logger.info("Edges after: " + graph.getEdges.size)
@@ -250,14 +268,17 @@ object GraphSimplifier extends App {
       }.map(p => (p._1, p._2.size)).toSeq.sortBy(_._1)
       logger.info("Components histogram: " + hist2)
       
-//      val maxComponent = components.maxBy(_.size)
-//      logger.info("Max component size: " + maxComponent.size)
-//      graph.retain(maxComponent)
+      val maxComponent = components.maxBy(_.size)
+      logger.info("Max component size: " + maxComponent.size)
   
       outf.close()
+      
+      hist(DenseVector(graph.getEdges.map(_.seq.size).filter(_ > 100).toSeq: _*), 100)
     }
   }
+  graph.asInstanceOf[MapGraph].write(graphfile)
 
-  graph.writeDot(new PrintWriter(outfile))
+//  graph.retain(graph.neighbours(graph.getNodes.head, 100))
+//  graph.writeDot(new PrintWriter(graphfile))
 
 }

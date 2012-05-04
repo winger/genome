@@ -32,6 +32,21 @@ trait Graph {
   def replaceEnd(edgeId: Long, newEnd: Node)
   def simplifyGraph()
 
+  def neighbours(node: Node, count: Int): Set[Node] = {
+    val col = mutable.Set[Node]()
+
+    val queue = mutable.Queue[Node](node)
+    val visited = mutable.Set[Node]()
+    while (!queue.isEmpty && visited.size < count) {
+      val node = queue.dequeue()
+      visited += node
+      val neighbours = (node.inEdges.map(e => e.start) ++ node.outEdges.values.map(e => e.end)).filterNot(col).toSeq
+      col ++= neighbours
+      queue ++= neighbours
+    }
+    visited
+  }
+
   def components: Traversable[Set[Node]] = {
     val col = mutable.Set[Node]()
 
@@ -68,15 +83,12 @@ trait Graph {
     out.close()
   }
 
-  def getGraphMap: DNAMap[ArrayBuffer[GraphPosition]] = {
+  def getGraphMap: DNAMap[GraphPosition] = {
     val n = getNodes.size + getEdges.map(_.seq.size).sum
     val k = getNodes.head.seq.size.toByte
-    val nodeMap = new DNAMap[ArrayBuffer[GraphPosition]](k, n)
+    val nodeMap = new DNAMap[GraphPosition](k, n)
     def add(seq: DNASeq, pos: GraphPosition) {
-      nodeMap.get(seq) match {
-        case None => nodeMap.put(seq, ArrayBuffer(pos))
-        case Some(ar) => ar += pos
-      }
+      nodeMap.putNew(seq, pos)
     }
     val total = getEdges.map(_.seq.size).sum + getNodes.size
     val progress = new ConsoleProgress("Node map", 80)
@@ -99,12 +111,24 @@ trait Graph {
   }
 
   private def similar(a: DNASeq, b: DNASeq) = {
-    math.abs(a.length - b.length) < 5 //TODO fix this
+    math.abs(a.length - b.length) * 5 < (a.length max b.length) //TODO fix this
   }
   
   def removeBubbles() {
     //TODO store bubble info
+    val maxerrors = 3
     for (node <- getNodes) {
+//      def dfs(e1: Edge, e1dist: Int, e2: Edge, e2dist: Int, errors: Int): Boolean = {
+//        if (errors > maxerrors) {
+//          false
+//        } else {
+//          if (e1dist == e1.seq.length && e2dist == e2.seq.length && e1.end == e2.end) {
+//            true
+//          } else {
+//
+//          }
+//        }
+//      }
       val out = node.outEdges.values.toArray
       var toRemove = Set[Edge]()
       for (i <- 0 until out.size if !toRemove(out(i)); j <- i + 1 until out.size) {
@@ -157,8 +181,8 @@ class MapGraph extends Graph with KryoSerializable {
   }
 
   def removeEdge(edge: Edge) {
-    nodes.get(edge.startId).foreach(_.outEdgeIds -= edge.seq(0))
-    nodes.get(edge.endId).foreach(_.inEdgeIds -= edge.id)
+    nodes.get(edge.startId).foreach(n => n.synchronized(n.outEdgeIds -= edge.seq(0)))
+    nodes.get(edge.endId).foreach(n => n.synchronized(n.inEdgeIds -= edge.id))
     edges -= edge.id
   }
 
@@ -185,9 +209,13 @@ class MapGraph extends Graph with KryoSerializable {
       } else if (in.size == 1 && out.size == 1) {
         val e1 = in(0)
         val e2 = out(0)
-        removeEdge(e1)
-        removeEdge(e2)
-        addEdge(e1.start, e2.end, e1.seq ++ e2.seq)
+        if (e1 == e2) {
+          removeEdge(e1)
+        } else {
+          removeEdge(e1)
+          removeEdge(e2)
+          addEdge(e1.start, e2.end, e1.seq ++ e2.seq)
+        }
         removeNode(node)
       }
     }

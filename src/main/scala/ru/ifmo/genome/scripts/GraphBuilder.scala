@@ -20,7 +20,7 @@ object GraphBuilder extends App {
 
   val data = PairedEndData(infile)
   val k = 19
-  val rounds = 2
+  val rounds = 3
 
   val kmersFreq = FreqFilter.extractFilteredKmers(data, k, rounds)
 

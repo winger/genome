@@ -1,9 +1,9 @@
 package ru.ifmo.genome.ds
 
-import java.nio.{ByteBuffer, LongBuffer}
+import java.nio.ByteBuffer
 import java.util.concurrent.atomic.AtomicInteger
 import ru.ifmo.genome.dna.DNASeq
-import collection.mutable.BitSet
+import collection.mutable.{ArrayBuilder, BitSet}
 
 
 /**
@@ -26,7 +26,7 @@ class DNAMap[T](k: Byte, n: Int)(implicit mf: ClassManifest[T]) {
 
   def get(key: DNASeq): Option[T] = {
     assert(key.length == k)
-    var i = key.hashCode & mask
+    var i = improve(key.hashCode) & mask
     var ans: Option[T] = None
     while (ans.isEmpty && set(i)) {
       if (DNASeq.read(keys, i * sizeOfK, k) == key) {
@@ -37,10 +37,23 @@ class DNAMap[T](k: Byte, n: Int)(implicit mf: ClassManifest[T]) {
     }
     ans
   }
+
+  def getAll(key: DNASeq): Iterable[T] = {
+    assert(key.length == k)
+    var ans: List[T] = Nil
+    var i = improve(key.hashCode) & mask
+    while (set(i)) {
+      if (DNASeq.read(keys, i * sizeOfK, k) == key) {
+        ans ::= ar(i)
+      }
+      i = (i + 1) & mask
+    }
+    ans
+  }
   
   def put(key: DNASeq, v: T) {
     assert(count.incrementAndGet() <= maxSize * maxLoadFactor)
-    var i = key.hashCode & mask
+    var i = improve(key.hashCode) & mask
     while (set(i) && DNASeq.read(keys, i * sizeOfK, k) != key) {
       i = (i + 1) & mask
     }
@@ -48,6 +61,17 @@ class DNAMap[T](k: Byte, n: Int)(implicit mf: ClassManifest[T]) {
       set += i
       key.write(keys, i * sizeOfK)
     }
+    ar(i) = v
+  }
+
+  def putNew(key: DNASeq, v: T) {
+    assert(count.incrementAndGet() <= maxSize * maxLoadFactor)
+    var i = improve(key.hashCode) & mask
+    while (set(i)) {
+      i = (i + 1) & mask
+    }
+    set += i
+    key.write(keys, i * sizeOfK)
     ar(i) = v
   }
   
@@ -62,9 +86,9 @@ object DNAMap {
   
   def sizeOf(k: Byte) = {
     if (k <= 32) {
-      4
-    } else if (k <= 64) {
       8
+    } else if (k <= 64) {
+      16
     } else {
       (k + 3) / 4
     }
@@ -76,5 +100,12 @@ object DNAMap {
       n *= 2
     }
     n
+  }
+
+  private[DNAMap] def improve(hcode: Int) = {
+    var h: Int = hcode + ~(hcode << 9)
+    h = h ^ (h >>> 14)
+    h = h + (h << 4)
+    h ^ (h >>> 10)
   }
 }
