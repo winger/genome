@@ -8,10 +8,10 @@ object PegasBuild extends Build {
   lazy val Pegas = Project(
     id = "pegas",
     base = file("."),
-    settings = defaultSettings ++ AkkaKernelPlugin.distSettings ++ Seq(
+    settings = (defaultSettings ++ AkkaKernelPlugin.distSettings ++ Seq(
       distJvmOptions in Dist := "-Xmx1G",
       outputDirectory in Dist := file("target/dist")
-    )
+    )).asInstanceOf[Seq[Project.Setting[_]]]
   )
 
   lazy val buildSettings = Defaults.defaultSettings ++ Seq(

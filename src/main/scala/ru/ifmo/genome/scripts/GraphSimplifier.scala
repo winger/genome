@@ -42,7 +42,7 @@ object GraphSimplifier extends App {
   val k = graph.getNodes.head.seq.length
   logger.info("K = " + k)
 
-  for (it <- 0 until 5) {
+  for (it <- 0 until 1) {
     System.gc()
 
     for (edge <- graph.getEdges) {
@@ -255,7 +255,7 @@ object GraphSimplifier extends App {
   
       logger.info("Edges before: " + graph.getEdges.size)
       toRemove.foreach(id => graph.removeEdge(graph.getEdge(id)))
-      graph.removeBubbles()
+//      graph.removeBubbles()
       graph.simplifyGraph()
       logger.info("Edges after: " + graph.getEdges.size)
   

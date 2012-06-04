@@ -6,7 +6,6 @@ import java.io._
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.ConcurrentHashMap
 import scala.collection._
-import mutable.ArrayBuffer
 import ru.ifmo.genome.dna.{DNASeq, Base}
 import com.esotericsoftware.kryo.{Kryo, KryoSerializable}
 import scala.{Long, collection, Int}
@@ -84,13 +83,14 @@ trait Graph {
   }
 
   def getGraphMap: DNAMap[GraphPosition] = {
-    val n = getNodes.size + getEdges.map(_.seq.size).sum
     val k = getNodes.head.seq.size.toByte
-    val nodeMap = new DNAMap[GraphPosition](k, n)
+    val nodeMap = new DNAMap[GraphPosition](k)
     def add(seq: DNASeq, pos: GraphPosition) {
+      val s0 = nodeMap.size
       nodeMap.putNew(seq, pos)
+      assert(nodeMap.size - s0 == 1)
     }
-    val total = getEdges.map(_.seq.size).sum + getNodes.size
+    val total = getEdges.map(_.seq.size).sum + getNodes.size - getEdges.size
     val progress = new ConsoleProgress("Node map", 80)
     for (node <- getNodes) {
       add(node.seq, new NodeGraphPosition(node))
@@ -107,6 +107,7 @@ trait Graph {
       progress(nodeMap.size.toDouble / total)
     }
     progress.done()
+    println(nodeMap.size + " " + total)
     nodeMap
   }
 
