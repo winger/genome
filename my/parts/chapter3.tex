@@ -1,0 +1,294 @@
+\chapter{Новый подход к решению задачи с использованием paired-end данных}
+\label{chapter3}
+
+\section{Граф де Брейна}
+
+Графом де Брейна $k$-ого порядка называют ориентированный граф, в котором вершинам соответствуют строки длины $k$,
+а ребрам~--- строки длины $k+1$, причем ребра идут из вершины, соответствующей префиксу строки ребра, в вершину,
+соответствующую суффиксу.
+
+\begin{figure}[h]
+\center{
+\includegraphics{pic/debrujin.svg.eps}
+}
+\caption{Пример графа де Брейна.}
+\label{debrujin1}
+\end{figure}
+
+Из определения следует что для любого ребра $(u,v)$ суффикс $u$ длины $k-1$ совпадает с префиксом $v$ длины $k-1$.
+Ясно, что любому пути в графе соответствует строка, составленная из перекрывающихся строк в вершинах. К примеру
+в графе на рис.~\ref{debrujin1} пути из вершины ACAGT в вершину AGTTCC соответствует строка ACAGTTCC.
+
+\section{Алгоритм восстановления цельных фрагментов по известным концам и длине}
+
+Бужес решать следущую задачу: по набору пар чтений ${(u_i, v_i)}$ (каждое чтение длинной $k$) и длине исходного
+фрагмента $m$ восстановить набор исходных фрагментов.
+
+\begin{figure}[h]
+\center{
+\includegraphics{pic/general.svg.eps}
+}
+\caption{Исходные данные.}
+\label{general1}
+\end{figure}
+
+\subsection{Описание общего алгоритма}
+
+Построим по строкам $u_i, v_i$ граф де Брейна $G$ (то есть граф де Брейна, в котором вершины соответствуют данным
+строкам и проведены все возможные ребра). Каждой паре строк $(u_i, v_i)$ соответствует фрагмент исходной
+последовательности $x_i$ длиной $m$. Рассмотрим все подстроки $x_i$ длиной $k$: $y_i^j=x_i[j \twodots j+k-1]$, причем 
+$y_i^j=u_i$ и $y_i^{m-k}=v_i$. Предположим что покрытие достаточно чтобы каждая подстрока исходной строки была
+прочитана хотя бы раз без ошибок. Тогда все $y_i^j$ будут встречаться в качестве вершин $G$. Более того, между
+$y_i^j$ и $y_i^{j+1}$ в $G$ будет ребро, соответствующее строке $x_i[j \twodots j+k]$. Таким образом, в $G$ есть
+путь из $y_i^1 = u_i$ в $y_i^{m-k} = v_i$ длиной $m-k$, соответсвующий строке $x_i$ и наша задача сводится
+к поиску в графе $G$ пути между двумя вершинами заданной длины.
+
+Рассмотрим следующий алгоритм:
+
+\begin{algorithm}
+\caption{\proc{Walk}}
+\begin{codebox}
+\Procname{$\proc{Walk}(G, u, v, \id{foundPaths})$}
+\li \Return $\proc{Recursive-Walk}(G, \attrib{G}{vertices}[u], \attrib{G}{vertices}[v], 0, u, \id{foundPaths})$
+\end{codebox}
+\begin{codebox}
+\Procname{$\proc{Recursive-Walk}(G, u, v, \id{depth}, \id{pathString}, \id{foundPaths})$}
+\li \If $\id{depth} > \const{maxDepth}$
+\li \Then
+      \Comment Отсечение перебора при превышении максимальной длины
+\li   \Return
+    \End
+\li \If $u \isequal v$ and $\id{depth} \geqslant \const{minDepth}$
+\li \Then
+      \Comment Найден путь
+\li   \attribii{foundPaths}{add}(\id{pathString})
+    \End
+\li \For $(u, u') \in \attrib{G}{edges}$
+\li   \Do
+      \Comment перебираем очередное ребро в пути
+\li   $\id{newPathString} \gets \id{pathString} + \attribe{u}{u'}{symbol}$
+\li   \Comment аттрибут \id{symbol} ребра $(u, v)$ содержит символ $c$
+\li   \Comment такой, что $(u + c)[2 \twodots \attrib{u}{length}] \isequal v$
+\li   $\proc{Recursive-Walk}(G, u', v, \id{depth} + 1, \id{newPathString}, \id{foundPaths})$
+      \End
+\end{codebox}
+\end{algorithm}
+
+Данный алгоритм находит все строки, соответствующие путям в графе $G$ из вершины $u$ в вершину $v$ и
+имеющие длину от \const{minDepth} до \const{maxDepth}.
+Процедура \proc{Recursive-Walk} реализует рекурсивный обход графа. В процессе работы поддерживаются следующие
+инварианты: 
+\begin{itemize}
+\item \id{depth} содержит длину текущего рассматриваемого пути.
+\item \id{pathString} содержит прочтение текущего рассматриваемого пути.
+\end{itemize}
+Когда текущая длина пути превышает \const{maxDepth}, поиск обрывается.
+
+Получим эмпирическую оценку сложности алгоритма. Будем исходить из предположения что граф $G$
+случаен и средняя степень вершины в нем $d$. Тогда вызовов \proc{Recursive-Walk} с
+$\id{depth} \isequal 0$ будет $1 = d^0$, с $\id{depth} \isequal 1$ их будет $d^1$, и т.д.
+$\id{depth} \isequal \const{maxDepth}$ их будет $d^{\const{maxDepth}}$. Таким образом, всего вызовов будет
+$\sum_{i=0}^{\const{maxDepth}}d^i=\frac{d^{\const{maxDepth}+1}-1}{d-1}=O(d^{\const{maxDepth}})$
+
+%картинко
+
+\subsection{Meet-in-the-Middle вариант реализации}
+
+Для ускорения алгоритма 1 можно применить подход Meet-in-the-Middle.
+
+Рассмотрим алгоритм 2. Он работает следующем образом: для всех вершин графа
+находятся пути из начальной вершины длиной не более $\lceil \frac{\const{maxDepth}}{2} \rceil$ и
+пути в конечную вершину длиной не более $\lfloor \frac{\const{maxDepth}}{2} \rfloor$. После этого
+в каждой посещенной вершине мы конкатенируем все возможные префиксы и суффиксы пути нужной длины.
+
+Цикл в строках 5-7 процедуры \proc{Walk-MitM} можно реализовать за $O(\const{maxDist} \cdot |\id{foundPaths}|)$
+(каждый конечный путь рассматривается максимум \const{maxDist} раз). Вызовы функций не сильно отличаются
+от рекурсивного обходчика в алгоритме 1 и выполняются за $O(d^{\lceil \frac{\const{maxDist}}{2} \rceil})$.
+Таким образом, в целом алгоритм выполняется за $O(d^{\lceil \frac{\const{maxDist}}{2} \rceil} + \const{maxDist} \cdot |\id{foundPaths}|)$
+
+\begin{algorithm}
+\caption{\proc{Walk-MitM}}
+\begin{codebox}
+\Procname{$\proc{Walk-MitM}(G, u, v, \id{foundPaths})$}
+\li $\id{visited} \gets \const{Empty-Set}$
+\li $\proc{Recursive-Walk-Forward}(G, \attrib{G}{vertices}[u], 0, u, \id{visited})$
+\li $\proc{Recursive-Walk-Backward}(G, \attrib{G}{vertices}[v], 0, "")$
+\li \For $\id{node} \in \id{visited}$
+\li \Do
+      \For $\id{prefix} \in \attribii{node}{forwardPaths}, \id{suffix} \in \attribii{node}{backwardPaths}$,
+\li   $\const{minDepth} \leqslant |\id{prefix}| + |\id{suffix}| \leqslant \const{maxDepth}$
+\li   \Do
+        $\attribii{foundPaths}{add}(\id{prefix} + \id{suffix})$
+      \End
+    \End
+\end{codebox}
+\begin{codebox}
+\Procname{$\proc{Recursive-Walk-Forward}(G, u, \id{depth}, \id{pathString}, \id{visited})$}
+\li \If $2 \cdot \id{depth} > \const{maxDepth} + 1$
+\li \Then
+      \Return
+    \End
+\li $\attribii{visited}{add}(\id{u})$
+\li $\attribb{u}{forwardPaths}{add}(\id{pathString})$
+\li \For $(u, u') \in \attrib{G}{edges}$
+\li   \Do
+      $\id{newPathString} \gets \id{pathString} + \attribe{u}{u'}{symbol}$
+\li   $\proc{Recursive-Walk-Forward}(G, u', \id{depth} + 1, \id{newPathString}, \id{foundPaths})$
+      \End
+\end{codebox}
+\begin{codebox}
+\Procname{$\proc{Recursive-Walk-Backward}(G, u, v, \id{depth}, \id{pathString})$}
+\li \If $2 \cdot \id{depth} > \const{maxDepth}$
+\li \Then
+      \Return
+    \End
+\li $\attribb{u}{backwardPaths}{add}(\id{pathString})$
+\li \For $(u', u) \in \attrib{G}{edges}$
+\li   \Do
+      $\id{newPathString} \gets \id{pathString} + \attribe{u'}{u}{symbol}$
+\li   $\proc{Recursive-Walk-Backward}(G, u', \id{depth} + 1, \id{newPathString}, \id{foundPaths})$
+      \End
+\end{codebox} 
+\end{algorithm}
+
+%\subsection{Эвристики устранения неопределенностей}
+
+%К сожалению, одной паре чтений может соответствовать несколько различных путей, даже если эта пара
+%соответствует уникальному фрагменту. Для устранения неопределенностей такого рода воспользуемся
+%следующим наблюдением: 
+
+\subsection{Выявление ошибок чтения}
+
+Модифицировав данный алгоритм, можно получить эффективный метод устранения ошибочных чтений. 
+
+Рассмотрим исходную последовательность ДНК: в ней каждая подстрока длины $k$ перекрывается как минимум $m - k$
+фрагментами (кроме близких к краям), см. \figurename\ref{pic1}.
+
+\begin{figure}[h]
+\center{
+\includegraphics{pic/pic1.svg.eps}
+}
+\caption{}
+\label{pic1}
+\end{figure}
+
+Посчитаем для каждой вершины графа, сколько раз через нее проходят пути, найденные алгоритмом. После
+этого, будем считать ошибочными все чтения, соответствующие вершинам с числом путей, не превосходящим
+заданный порог.
+
+Для подсчета путей, проходящих через вершины, модифицируем алгоритм 1, получив алгоритм 3.
+
+\begin{algorithm}
+\caption{\proc{Walk2}}
+\begin{codebox}
+\Procname{$\proc{Walk2}(G, u, v, \id{foundPaths})$}
+\li \Return $\proc{Recursive-Walk2}(G, \attrib{G}{vertices}[u], \attrib{G}{vertices}[v], 0, u, \id{foundPaths})$
+\end{codebox}
+\begin{codebox}
+\Procname{$\proc{Recursive-Walk2}(G, u, v, \id{depth}, \id{pathString}, \id{foundPaths})$}
+\li \If $\id{depth} > \const{maxDepth}$
+\li \Then
+      \Return 0
+    \End
+\li $\id{paths} \gets 0$
+\li \If $u \isequal v$ and $\id{depth} \geqslant \const{minDepth}$
+\li \Then
+      \attribii{foundPaths}{add}(\id{pathString})
+\li   $\id{paths} \gets \id{paths} + 1$
+    \End
+\li \For $(u, u') \in \attrib{G}{edges}$
+\li \Do
+      $\id{newPathString} \gets \id{pathString} + \attribe{u}{u'}{symbol}$
+\li   $\id{paths} \gets \id{paths} + \proc{Recursive-Walk2}(G, u', v, \id{depth} + 1, \id{newPathString}, \id{foundPaths})$
+    \End
+\li $\attrib{u}{paths} \gets \attrib{u}{paths} + \id{paths}$
+\li \Return \id{paths}
+\end{codebox}
+\end{algorithm}
+
+\subsection{Оценка производительности}
+
+Предположим что исходная последовательность является случайной последовательностью оснований длиной $n$.
+Тогда в графе де Брейна в среднем будет $n - 1 + 4 n \frac{n}{2^{n-1}}$, значит средняя степень вершины
+будет $d \approx 1 + \frac{n}{2^{k-3}}$. Среднее время, затраченное на поиск всех путей между парой вершин
+будет $O(d^{m-k})$. 
+
+При $m=200,k=36$ алгоритм остается эффективным при $n \approx 10^8$.
+
+%TODO доказательства
+
+Если в алгоритме использовать метод meet-in-the-middle вместо простого перебора, оценку можно улучшить до
+$O(d^{\frac{n-m}{2}})$.
+
+При $m=200,k=36$ такой алгоритм можно эффективно применять для $n \approx 10^9$.
+
+\section{Общая схема системы}
+
+Общая схема решения состоит в следующем:
+
+\begin{enumerate}
+\item Построить граф де Брейна
+\item Провести первую итерацию алгоритма восстановления фрагментов
+\item Воспользовавшись полученной информацией о частоте использования вершин
+удалить ошибочные вершины из графа
+\item Провести вторую итерацию алгоритма
+\item Воспользоваться одним из общих алгоритмов секвенирования, не
+использующий информацию о парах
+\end{enumerate}
+
+\section{Масштабируемость системы}
+
+Алгоритмы 1, 2 и 3 обрабатывают все пары чтений полностью независимо. В связи с этим
+метод хорошо поддается масштабированию на распределенные системы.
+
+Рассмотрим схему такой распределенной системы:
+\begin{enumerate}
+\item Построить граф де Брейна на центральном узле и раздать его всем остальным узлах
+(либо хранить его в некоторой распределенной базе данных).
+\item Равномерно распределить пары по узлам.
+\item Каждый узел выполняет алгоритм 3 на прикрепленных к нему парах.
+\item Полученные веса вершин суммируются по всем узлам.
+\item Из графа удаляются ошибочные вершины и граф снова раздается узлам.
+\item Узлы выполняют алгоритм 1 или алгоритм 2 на прикрепленных к нему парах.
+\item Восстановленные фрагменты собираются и передаются алгоритму решения обычной задачи секвенирования.
+\end{enumerate}
+
+\section{Реализация алгоритма}
+
+В рамках данной работы создана реализация метода на языке программирования
+Java. 
+
+\section{Экспериментальные данные}
+
+Идеальные данные без ошибок симулировались следующем образом: из образца ДНК брались все возможные
+фрагменты длиной $m$. В качестве данных брались пары (префикс, суффикс), полученные из этих 
+фрагментов.
+
+На симулированных данных без ошибок для генома Escherichia Coli алгоритм восстанавливает $98\%$ фрагментов,
+что обеспечивает $99.5\%$ покрытия исходной последовательности.
+
+Зашумленные данные симулировались следующем образом: фиксированное число раз из образца ДНК проводилось
+чтение: выбиралась случайная длина фрагмента по нормальному распределению с матожиданием $m$ и заданной
+дисперсией, случайным образом выбирался фрагмент полученной длины, бралась пара (префикс, суффикс) и
+в нее вносились случайным образом ошибки в соответствии со статистикой ошибок в реальных данных.
+
+На симулированных сильно зашумленных данных ($60\%$ чтений с хотя бы одной ошибкой) для генома Haemophilus
+Influenzae алгоритм возвращает $0.01\%$ ошибочных фрагментов и обеспечивает $99.5\%$ покрытия исходной
+последовательности.
+
+%\subsection{Результаты численных экспериментов}
+
+%[TODO]
+
+%\subsection{Сравнение с результатами существующих систем}
+
+%[TODO]
+
+%\section{Направления дальнейшей работы}
+
+%Данный метод хорошо поддается масштабированию, так как каждую
+%пару можно обрабатывать независимо друг от друга.
+
+%\section{Выводы по главе \protect\ref{chapter3}}
+
+%[TODO]

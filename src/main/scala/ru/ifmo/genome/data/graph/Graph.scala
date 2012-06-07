@@ -4,12 +4,16 @@ import ru.ifmo.genome.util.ConsoleProgress
 import com.esotericsoftware.kryo.io.{Input, Output}
 import java.io._
 import java.util.concurrent.atomic.AtomicLong
-import java.util.concurrent.ConcurrentHashMap
 import scala.collection._
 import ru.ifmo.genome.dna.{DNASeq, Base}
 import com.esotericsoftware.kryo.{Kryo, KryoSerializable}
 import scala.{Long, collection, Int}
-import ru.ifmo.genome.ds.DNAMap
+import java.util.concurrent.ConcurrentHashMap
+import akka.dispatch.Await
+import ru.ifmo.genome.scripts.ActorsHome._
+import akka.util.duration._
+import akka.actor.Actor
+import ru.ifmo.genome.ds.{ArrayDNAMap, PartitionedDNAMap, DNAMap}
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
@@ -84,7 +88,8 @@ trait Graph {
 
   def getGraphMap: DNAMap[GraphPosition] = {
     val k = getNodes.head.seq.size.toByte
-    val nodeMap = new DNAMap[GraphPosition](k)
+//    val nodeMap = new PartitionedDNAMap[GraphPosition](k, 1)
+    val nodeMap = new ArrayDNAMap[GraphPosition](k)
     def add(seq: DNASeq, pos: GraphPosition) {
       val s0 = nodeMap.size
       nodeMap.putNew(seq, pos)
@@ -94,6 +99,7 @@ trait Graph {
     val progress = new ConsoleProgress("Node map", 80)
     for (node <- getNodes) {
       add(node.seq, new NodeGraphPosition(node))
+      progress(nodeMap.size.toDouble / total)
     }
     for (edge <- getEdges) {
       val start = edge.seq.head
@@ -256,15 +262,12 @@ class MapGraph extends Graph with KryoSerializable {
 
 object Graph {
   val (logger, formatter) = ZeroLoggerFactory.newLogger(Graph)
-
   import formatter._
 
   val chunkSize = 1024
 
-  def buildGraph(k: Int, kmersFreq : collection.Map[DNASeq, Int]) = {
-    var kmers = kmersFreq.keySet.toSet
-
-    def contains(x: DNASeq) = kmers.contains(x) || kmers.contains(x.revComplement)
+  def buildGraph(k: Byte, kmersFreq : DNAMap[Int]): Graph = {
+    def contains(x: DNASeq) = Await.result(kmersFreq.contains(x), 1 second) || Await.result(kmersFreq.contains(x.revComplement), 1 second)
 
     def incoming(x: DNASeq) = {
       for (base <- Base.fromInt if contains(base +: x.take(k - 1))) yield {
@@ -314,63 +317,66 @@ object Graph {
 //
 //    kmers ++= restoredKmers
 
-    val termKmers = {
-      val t = kmers.par.filter {
-        read =>
-          val in = incoming(read).size
-          val out = outcoming(read).size
-          (in != 1 || out != 1) && (in != 0 || out != 0)
-      }.seq
-      t ++ t.map(_.revComplement)
+    val termKmers = new PartitionedDNAMap[Unit](k, 4)
+
+    val op1 = kmersFreq.foreach{ case (read, _) =>
+      val in = incoming(read).size
+      val out = outcoming(read).size
+      if ((in != 1 || out != 1) && (in != 0 || out != 0)) {
+        termKmers.update(read, ())
+        termKmers.update(read.revComplement, ())
+      }
     }
+    Await.ready(op1, 1 hour)
 
     logger.info("Terminal reads: " + termKmers.size)
 
-    logger.info("Split reads: " + termKmers.count(read => incoming(read).size > 1 || outcoming(read).size > 1))
+//    logger.info("Split reads: " + termKmers.count(read => incoming(read).size > 1 || outcoming(read).size > 1))
 
     val graph: Graph = new MapGraph
 
     val progress = new ConsoleProgress("building graph", 80)
 
-    val nodeMap = {
-      for (read <- termKmers) yield {
-        read -> graph.addNode(read)
-      }
-    }.toMap
-
-    def buildEdges(read: DNASeq) {
-      val node = nodeMap(read)
-      for (base <- outcoming(read)) {
-        val builder = DNASeq.newBuilder += base
-        var seq = read.drop(1) :+ base
-        var length = 1
-        while (!nodeMap.contains(seq)) {
-          val out = outcoming(seq)
-          assert(out.size == 1, seq + " " + out.toSeq)
-          builder += out(0)
-          length += 1
-          seq = seq.drop(1) :+ out(0)
-        }
-        val node1 = nodeMap(seq)
-        graph.addEdge(node, node1, builder.result())
-      }
-    }
-
-    var count = 0d
-    for (chunk <- termKmers.iterator.grouped(chunkSize)) {
-      for (read <- chunk) {
-        buildEdges(read)
-      }
-      count += chunk.size
-      progress(count / termKmers.size)
-    }
-    //TODO: perfect cycles are ignored
-
-    progress.done()
-
-    logger.info("Graph nodes: " + nodeMap.size)
-
-    graph
+    null
+//    val nodeMap = {
+//      for (read <- termKmers) yield {
+//        read -> graph.addNode(read)
+//      }
+//    }.toMap
+//
+//    def buildEdges(read: DNASeq) {
+//      val node = nodeMap(read)
+//      for (base <- outcoming(read)) {
+//        val builder = DNASeq.newBuilder += base
+//        var seq = read.drop(1) :+ base
+//        var length = 1
+//        while (!nodeMap.contains(seq)) {
+//          val out = outcoming(seq)
+//          assert(out.size == 1, seq + " " + out.toSeq)
+//          builder += out(0)
+//          length += 1
+//          seq = seq.drop(1) :+ out(0)
+//        }
+//        val node1 = nodeMap(seq)
+//        graph.addEdge(node, node1, builder.result())
+//      }
+//    }
+//
+//    var count = 0d
+//    for (chunk <- termKmers.iterator.grouped(chunkSize)) {
+//      for (read <- chunk) {
+//        buildEdges(read)
+//      }
+//      count += chunk.size
+//      progress(count / termKmers.size)
+//    }
+//    //TODO: perfect cycles are ignored
+//
+//    progress.done()
+//
+//    logger.info("Graph nodes: " + nodeMap.size)
+//
+//    graph
   }
 
   def apply(file: File): Graph = {

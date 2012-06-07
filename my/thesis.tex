@@ -1,0 +1,180 @@
+% This is an AMS-LaTeX v. 1.2 File.
+
+\documentclass{report}
+
+%\usepackage{pscyr}
+%\renewcommand{\rmdefault}{fjn}
+%\renewcommand{\ttdefault}{fcr}
+
+%\usepackage{showkeys}
+%\usepackage{concmath}
+\usepackage{clrscode3e}
+\usepackage[cp1251]{inputenc}
+\usepackage[T2A]{fontenc}
+\usepackage[russian,english]{babel}
+\usepackage{expdlist}
+\usepackage[dvips]{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{amsfonts}
+\usepackage{amsxtra} 
+\usepackage{cite}
+\usepackage{sty/dbl12}
+\usepackage{srcltx}
+\usepackage{epsfig}
+\usepackage{verbatim}
+\usepackage{sty/rac}
+%\usepackage[russian]{sty/ralg}
+\usepackage{listings}
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% Redefine margins and other page formatting
+
+\setlength{\oddsidemargin}{0.5in}
+
+% Various theorem environments. All of the following have the same numbering
+% system as theorem.
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Теорема}
+\newtheorem{prop}[theorem]{Утверждение}
+\newtheorem{corollary}[theorem]{Следствие}
+\newtheorem{lemma}[theorem]{Лемма}
+\newtheorem{question}[theorem]{Вопрос}
+\newtheorem{conjecture}[theorem]{Гипотеза}
+\newtheorem{assumption}[theorem]{Предположение}
+
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Определение}
+\newtheorem{notation}[theorem]{Обозначение}
+\newtheorem{condition}[theorem]{Условие}
+\newtheorem{example}[theorem]{Пример}
+%\newtheorem{algorithm}[theorem]{Алгоритм}
+
+\usepackage{float}
+\floatstyle{ruled}
+\newfloat{algorithm}{tbph}{aux}
+\floatname{algorithm}{Алгоритм}
+
+
+%\newtheorem{introduction}[theorem]{Introduction}
+
+\renewcommand{\proof}{\\\textbf{Доказательство.}~}
+
+\def\startprog{\begin{lstlisting}[language=Java,basicstyle=\normalsize\ttfamily]}
+
+%\theoremstyle{remark}
+%\newtheorem{remark}[theorem]{Remark}
+%\include{header}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\numberwithin{theorem}{chapter}        % Numbers theorems "x.y" where x
+                                        % is the section number, y is the
+                                        % theorem number
+
+%\renewcommand{\thetheorem}{\arabic{chapter}.\arabic{theorem}}
+
+%\makeatletter                          % This sequence of commands will
+%\let\c@equation\c@theorem              % incorporate equation numbering
+%\makeatother                           % into the theorem numbering scheme
+
+%\renewcommand{\theenumi}{(\roman{enumi})}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%This command creates a box marked ``To Do'' around text.
+%To use type \todo{  insert text here  }.
+
+\newcommand{\todo}[1]{\vspace{5 mm}\par \noindent
+\marginpar{\textsc{ToDo}}
+\framebox{\begin{minipage}[c]{0.95 \textwidth}
+\tt #1 \end{minipage}}\vspace{5 mm}\par}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+\binoppenalty=10000
+\relpenalty=10000
+
+\begin{document}
+
+\def\t#1{\mbox{\texttt{\hbox{#1}}}}
+\def\b#1{\textbf{#1}}
+\def\tb#1{\t{\b{#1}}}
+
+\def\cln#1{\t{#1}}
+\def\pcn#1{\t{#1}}
+\newcommand{\p}{\par Здесь будет текст...}
+\renewcommand{\figurename}{Рис.~}
+
+\bibliographystyle{sty/gost71s-n}
+
+% Begin the front matter as required by Rackham dissertation guidelines
+
+\initializefrontsections
+
+\pagestyle{title}
+
+\begin{center}
+Санкт-Петербургский государственный университет \\ информационных технологий, механики и оптики
+
+\vspace{2cm}
+
+Факультет информационных технологий и программирования
+
+Кафедра компьютерных технологий
+
+\vspace{3cm}
+
+{\Large Исенбаев Владислав Вольдемарович}
+
+\vspace{2cm}
+
+\vbox{\LARGE\bfseries
+Разработка системы секвенирования ДНК с использованием paired-end данных.
+}
+
+\vspace{4cm}
+
+{\Large Научный руководитель: доктор технических наук, \\профессор А.~А.~Шалыто.}
+
+\vspace{6cm}
+
+Санкт-Петербург\\ 2010
+\end{center}
+
+\newpage
+
+\setcounter{page}{3}
+\pagestyle{plain}
+
+%\dedicationpage{Put a dedication here}
+% Dedication page
+
+%\startacknowledgementspage
+% Acknowledgements page
+%{Put Acknowledgements here}
+
+% Table of contents, list of figures, etc.
+\tableofcontents
+%\listoffigures
+
+% Chapters
+\startthechapters
+\input{parts/intro.tex}
+\input{parts/chapter1.tex}
+\input{parts/chapter2.tex}
+\input{parts/chapter3.tex}
+%\input{parts/chapter4.tex}
+\input{parts/outro.tex}
+
+%\bibliography{thesis}
+
+%\startappendices
+%\input{parts/appendix1.tex}
+
+\end{document}

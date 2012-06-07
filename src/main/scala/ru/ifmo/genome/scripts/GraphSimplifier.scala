@@ -8,21 +8,21 @@ import scala.collection.parallel.ParSeq
 import scala.collection.immutable.Range.Inclusive
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
-import scalala.library.Statistics._
 import scalala.library.Plotting._
-import scalala.tensor.sparse.SparseVector
 import scalala.tensor.dense.DenseVector
 import java.io._
 import scala._
 import collection.mutable.{SynchronizedMap, PriorityQueue}
 import scala.Predef._
+import akka.dispatch.Await
+import akka.util.duration._
 
 /**
 * Author: Vladislav Isenbaev (isenbaev@gmail.com)
 */
 
 object GraphSimplifier extends App {
-  val (logger, formatter) = ZeroLoggerFactory.newLogger(GraphBuilder)
+  val (logger, formatter) = ZeroLoggerFactory.newLogger(GraphSimplifier)
   import formatter._
 
   logger.info("Started")
@@ -99,15 +99,15 @@ object GraphSimplifier extends App {
         for (chunk <- data.getPairs.grouped(1024)) yield {
           val chunkRes: ParSeq[Iterable[(Iterable[GraphPosition], Iterable[GraphPosition])]] = {
             for ((p1: DNASeq, p2: DNASeq) <- chunk.par if p1.length >= k && p2.length >= k) yield {
-              if (!graphMap.contains(p1.take(k)) || !graphMap.contains(p2.take(k).revComplement)) {
+              if (!Await.result(graphMap.contains(p1.take(k)), 1 second) || !Await.result(graphMap.contains(p2.take(k).revComplement), 1 second)) {
                 notFoundPairs1 += 1
               }
-              if (!graphMap.contains(p2.take(k)) || !graphMap.contains(p1.take(k).revComplement)) {
+              if (!Await.result(graphMap.contains(p2.take(k)), 1 second) || !Await.result(graphMap.contains(p1.take(k).revComplement), 1 second)) {
                 notFoundPairs2 += 1
               }
               Iterable(
-                (graphMap.getAll(p1.take(k)), graphMap.getAll(p2.take(k).revComplement)),
-                (graphMap.getAll(p2.take(k)), graphMap.getAll(p1.take(k).revComplement))
+                (Await.result(graphMap.getAll(p1.take(k)), 1 second), Await.result(graphMap.getAll(p2.take(k).revComplement), 1 second)),
+                (Await.result(graphMap.getAll(p2.take(k)), 1 second), Await.result(graphMap.getAll(p1.take(k).revComplement), 1 second))
               )
             }
           }
@@ -272,6 +272,20 @@ object GraphSimplifier extends App {
       logger.info("Max component size: " + maxComponent.size)
   
       outf.close()
+
+      val lengths = graph.getEdges.map(_.seq.size).toSeq.groupBy(identity).map(p => (p._1, p._2.size))
+      logger.info("" + lengths)
+
+      {
+        var i = 0
+        val out = new PrintWriter("contigs")
+        for (e <- graph.getEdges) {
+          out.println(e.seq)
+          out.println(">abacaba" + i)
+          i += 1
+        }
+        out.close()
+      }
       
       hist(DenseVector(graph.getEdges.map(_.seq.size).filter(_ > 100).toSeq: _*), 100)
     }

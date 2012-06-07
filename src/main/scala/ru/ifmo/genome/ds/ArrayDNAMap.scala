@@ -3,23 +3,37 @@ package ru.ifmo.genome.ds
 import java.nio.ByteBuffer
 import ru.ifmo.genome.dna.DNASeq
 import collection.mutable.BitSet
+import akka.dispatch.{ExecutionContext, Promise, Future}
+import akka.actor.ActorSystem
 
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
 
-class DNAMap[T](k: Byte)(implicit mf: ClassManifest[T]) {
-  import DNAMap._
+trait DNAMap[T] {
+  def size: Int
+  def apply(key: DNASeq): Future[Option[T]]
+  def getAll(key: DNASeq): Future[Iterable[T]]
+  def update(key: DNASeq, v: T)
+  def update(key: DNASeq, v0: T, f: T => T)
+  def putNew(key: DNASeq,  v: T)
+  def deleteAll(p: (DNASeq, T) => Boolean)
+  def contains(key: DNASeq): Future[Boolean]
+  def foreach(f: ((DNASeq, T)) => Unit): Future[Unit]
+}
+
+class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], ec: ExecutionContext) extends DNAMap[T] {
+  import ArrayDNAMap._
   
   //TODO fix resize policy
 
-  def bins = container.bins
-  val sizeOfK = sizeOf(k)
+  private def bins = container.bins
+  private val sizeOfK = sizeOf(k)
   def size = container.size
-  var container = new Container(16)
+  private var container = new Container(16)
   
-  class Container(val bins: Int) {
+  private class Container(val bins: Int) {
     var size = 0
     val mask = bins - 1
     val keys: ByteBuffer = ByteBuffer.allocateDirect(sizeOfK * bins)
@@ -125,14 +139,14 @@ class DNAMap[T](k: Byte)(implicit mf: ClassManifest[T]) {
     }
   }
 
-  def apply(key: DNASeq): Option[T] = {
+  def apply(key: DNASeq): Future[Option[T]] = {
     assert(key.length == k)
-    container(key)
+    Promise successful container(key)
   }
 
-  def getAll(key: DNASeq): Iterable[T] = {
+  def getAll(key: DNASeq): Future[Iterable[T]] = {
     assert(key.length == k)
-    container.getAll(key)
+    Promise successful container.getAll(key)
   }
   
   def update(key: DNASeq, v: T) {
@@ -172,11 +186,15 @@ class DNAMap[T](k: Byte)(implicit mf: ClassManifest[T]) {
     }
   }
   
-  def contains(key: DNASeq) = apply(key).isDefined
+  def contains(key: DNASeq) = apply(key).map(_.isDefined)
+  
+  def foreach(f: ((DNASeq, T)) => Unit): Future[Unit] = Future {
+    container.iterator.foreach(f)
+  }
 
 }
 
-object DNAMap {
+object ArrayDNAMap {
   val minLoadFactor = 0.3
   val maxLoadFactor = 0.7
   

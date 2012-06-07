@@ -41,7 +41,7 @@ object CheckGraph extends App {
   for (line <- Source.fromFile(datafile).getLines() if !line.startsWith(">")) {
     for (str <- line.sliding(k) if str.forall(Base.fromChar.contains(_))) {
       val read = DNASeq(str.map(Base.fromChar): _*)
-      if (!graphMap.contains(read)) {
+      if (!graphMap.contains(read)()) {
         logger.info("Not found " + line.length + " " + read)
       }
     }

@@ -1,10 +1,9 @@
 package ru.ifmo.genome.data
 
-import ru.ifmo.genome.ds.BloomFilter
 import ru.ifmo.genome.dna.DNASeq
 import ru.ifmo.genome.util.ConsoleProgress
-import collection.mutable.ConcurrentMap
-import java.util.concurrent.ConcurrentHashMap
+import ru.ifmo.genome.ds.{DNAMap, PartitionedDNAMap}
+import ru.ifmo.genome.scripts.ActorsHome._
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
@@ -12,29 +11,19 @@ import java.util.concurrent.ConcurrentHashMap
 
 object FreqFilter {
   val (logger, formatter) = ZeroLoggerFactory.newLogger(FreqFilter)
-
   import formatter._
 
   val chunkSize = 1024
 
-  def extractFilteredKmers(data: PairedEndData, k: Int, rounds: Int) = {
-
-    import collection.JavaConversions._
-    val kmersFreq: ConcurrentMap[DNASeq, Int] = new ConcurrentHashMap[DNASeq, Int]
+  def extractFilteredKmers(data: PairedEndData, k: Byte, rounds: Int) = {
+    val kmersFreq: DNAMap[Int] = new PartitionedDNAMap[Int](k, 4)
 
     def add(seq: DNASeq) {
       if (seq.length >= k) {
         for (x <- seq.sliding(k)) {
           val rcx = x.revComplement
           val y = if (x.hashCode < rcx.hashCode) x else rcx
-          var done = false
-          if (!kmersFreq.contains(y)) {
-            done |= kmersFreq.putIfAbsent(y, 1).isEmpty
-          }
-          while (!done) {
-            val v = kmersFreq(y)
-            done |= kmersFreq.replace(y, v, v + 1)
-          }
+          kmersFreq.update(y, 1, _ + 1)
         }
       }
     }
@@ -53,7 +42,9 @@ object FreqFilter {
 
     progress.done()
 
-    kmersFreq.filter(_._2 >= rounds)
+    kmersFreq.deleteAll((k, v) => v < rounds)
+
+    kmersFreq
   }
 
   //  val hist = collection.mutable.Map[Int, Int]()
