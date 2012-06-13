@@ -9,8 +9,6 @@ import ru.ifmo.genome.dna.DNASeq
 
 @SerialVersionUID(1L)
 case class Edge(id: Long, startId: Long, endId: Long, seq: DNASeq) {
-  private def this() = this(-1, -1, -1, null) //for serialization only
-
   override def equals(obj: Any) = obj match {
     case Edge(oid, _, _, _) => id == oid
     case _ => false

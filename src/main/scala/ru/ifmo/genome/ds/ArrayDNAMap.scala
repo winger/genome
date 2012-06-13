@@ -13,7 +13,7 @@ import akka.event.Logging
  */
 
 trait DNAMap[T] {
-  def size: Int
+  def size: Future[Int]
   def apply(key: DNASeq): Future[Option[T]]
   def getAll(key: DNASeq): Future[Iterable[T]]
   def update(key: DNASeq, v: T)
@@ -34,7 +34,7 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], as: ActorSystem) ex
 
   private def bins = container.bins
   private val sizeOfK = sizeOf(k)
-  def size = container.size
+  def size = Promise successful container.size
   private var container = new Container(16)
   
   private class Container(val bins: Int) {
@@ -179,9 +179,9 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], as: ActorSystem) ex
   }
   
   def rescale() {
-    if (bins > 16 && size < bins * minLoadFactor || bins * maxLoadFactor < size) {
+    if (bins > 16 && container.size < bins * minLoadFactor || bins * maxLoadFactor < container.size) {
       var newBins = 16
-      while (newBins * maxLoadFactor < size) {
+      while (newBins * maxLoadFactor < container.size) {
         newBins *= 2
       }
       logger.info("rescaling to " + newBins)
@@ -196,7 +196,7 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], as: ActorSystem) ex
   def contains(key: DNASeq) = apply(key).map(_.isDefined)
   
   def mapReduce[T1, T2](f: ((DNASeq, T)) => Option[T1], reduce: Seq[T1] => T2): Future[T2] = Future {
-    reduce(container.iterator.flatMap(f(_).toIterator).toSeq)
+    reduce(container.iterator.flatMap(f(_).toIterator).toList)
   }
 
 }

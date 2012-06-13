@@ -6,6 +6,8 @@ import ru.ifmo.genome.data._
 import graph.{MapGraph, Graph}
 import akka.kernel.Bootable
 import akka.event.Logging
+import akka.dispatch.Await
+import akka.util.Duration
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
@@ -29,7 +31,7 @@ object GraphBuilder extends Bootable {
   
     val kmersFreq = FreqFilter.extractFilteredKmers(data, k, rounds)
   
-    logger.info("Good reads count: " + kmersFreq.size)
+    logger.info("Good reads count: " + Await.result(kmersFreq.size, Duration.Inf))
   
     implicit val graph = Graph.buildGraph(k, kmersFreq)
     val components = graph.components

@@ -23,4 +23,6 @@ object ActorsHome {
 
   val logger = Logging(system, getClass.getSimpleName)
   logger.info("" + (conf.root().get("genome")))
+
+  def main(args: Array[String]) {}
 }

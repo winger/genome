@@ -30,7 +30,7 @@ class PartitionedDNAMap[T](k: Byte)(implicit mf: Manifest[T]) extends DNAMap[T] 
   }.toSeq
 //  val partitions: Array[DNAMap[T]] = Array.fill(partitionsCount)(new ArrayDNAMap[T](k))
 
-  def size = partitions.map(_.size).sum
+  def size = Future.traverse(partitions)(_.size).map(_.sum)
 
   def apply(key: DNASeq) = partition(key).apply(key)
 

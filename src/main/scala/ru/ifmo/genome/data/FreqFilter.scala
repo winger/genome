@@ -31,14 +31,16 @@ object FreqFilter {
 
     val progress = new ConsoleProgress("kmers", 80)
 
+    val max = 8326576
+
     var count = 0
-    for (chunk <- data.getPairs.grouped(chunkSize)) {
+    for (chunk <- data.getPairs.take(max).grouped(chunkSize)) {
       for ((p1, p2) <- chunk.par) {
         add(p1)
         add(p2)
       }
       count += chunk.size
-      progress(count.toDouble / data.count)
+      progress(count.toDouble / (data.count min max))
     }
 
     progress.done()

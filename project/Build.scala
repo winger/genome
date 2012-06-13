@@ -28,13 +28,16 @@ object PegasBuild extends Build {
     resolvers ++= Seq(
       "Typesafe Repository" at "http://repo.typesafe.com/typesafe/snapshots/",
       "Scala Tools Snapshots" at "http://scala-tools.org/repo-snapshots/",
-      "ScalaNLP Maven2" at "http://repo.scalanlp.org/repo"
+      "ScalaNLP Maven2" at "http://repo.scalanlp.org/repo",
+      "Local Maven Repository" at "file://"+Path.userHome.absolutePath+"/.m2/repository"
     ),
     libraryDependencies ++= Seq(
       "com.typesafe.akka" % "akka-kernel" % AkkaVersion,
       "com.typesafe.akka" % "akka-remote" % AkkaVersion,
       "com.typesafe.akka" % "akka-slf4j" % AkkaVersion,
-      "ch.qos.logback" % "logback-classic" % "1.0.0"
+      "ch.qos.logback" % "logback-classic" % "1.0.0",
+      "com.romix.akka" % "akka-kryo-serialization" % "0.1-SNAPSHOT",
+      "com.esotericsoftware.kryo" % "kryo" % "2.14-SNAPSHOT"
 //      , "org.scalala" %% "scalala" % "1.0.0.RC2-SNAPSHOT"
     ),
     // compile options

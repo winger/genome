@@ -26,17 +26,12 @@ class NodeSerializer extends Serializer[Node] {
     }
   }
 
-  override def read(kryo: Kryo, in: Input, node: Node) {
-    node.seq = kryo.readClassAndObject(in).asInstanceOf[DNASeq]
-    for (it <- 0 until in.readInt()) {
-      node.inEdgeIds += in.readLong()
-    }
-    for (it <- 0 until in.readInt()) {
-      node.outEdgeIds += Base.fromInt(in.readByte()) -> in.readLong()
-    }
+  def read(kryo: Kryo, in: Input, typ: Class[Node]) = {
+    val seq = kryo.readClassAndObject(in).asInstanceOf[DNASeq]
+    val inEdgeIds = for (it <- 0 until in.readInt()) yield in.readLong()
+    val outEdgeIds = for (it <- 0 until in.readInt()) yield Base.fromInt(in.readByte()) -> in.readLong()
+    new Node(in.readLong(), seq, inEdgeIds.toSet, outEdgeIds.toMap)
   }
-
-  override def create(kryo: Kryo, in: Input, p3: Class[Node]) = new Node(in.readLong(), null, Set.empty[Long], Map.empty[Base, Long])
 }
 
 @DefaultSerializer(classOf[NodeSerializer])
