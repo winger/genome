@@ -4,19 +4,20 @@ import ru.ifmo.genome.dna.DNASeq
 import ru.ifmo.genome.util.ConsoleProgress
 import ru.ifmo.genome.ds.{DNAMap, PartitionedDNAMap}
 import ru.ifmo.genome.scripts.ActorsHome._
+import akka.event.Logging
+import ru.ifmo.genome.scripts.ActorsHome
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
 
 object FreqFilter {
-  val (logger, formatter) = ZeroLoggerFactory.newLogger(FreqFilter)
-  import formatter._
+  val logger = Logging(ActorsHome.system, getClass.getSimpleName)
 
   val chunkSize = 1024
 
   def extractFilteredKmers(data: PairedEndData, k: Byte, rounds: Int) = {
-    val kmersFreq: DNAMap[Int] = new PartitionedDNAMap[Int](k, 4)
+    val kmersFreq: DNAMap[Int] = new PartitionedDNAMap[Int](k)
 
     def add(seq: DNASeq) {
       if (seq.length >= k) {

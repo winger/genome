@@ -1,17 +1,26 @@
 package ru.ifmo.genome.scripts
 
 import akka.actor.ActorSystem
-import com.typesafe.config.ConfigFactory
+import com.typesafe.config.{Config, ConfigFactory}
+import akka.kernel.Bootable
+import akka.event.Logging
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
 
-object ActorsHome {
-  val (logger, formatter) = ZeroLoggerFactory.newLogger(ActorsHome)
-  import formatter._
+class ActorsHome extends Bootable {
+  def startup() {
+    ActorsHome.system
+  }
 
-  val conf = ConfigFactory.load("application.conf")
-  implicit val system = ActorSystem("main", conf)
-//  logger.info("" + system.settings);
+  def shutdown() {}
+}
+
+object ActorsHome {
+  val conf: Config = ConfigFactory.load()
+  implicit val system = ActorSystem()
+
+  val logger = Logging(system, getClass.getSimpleName)
+  logger.info("" + (conf.root().get("genome")))
 }

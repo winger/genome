@@ -5,6 +5,7 @@ import ru.ifmo.genome.dna.DNASeq
 import collection.mutable.BitSet
 import akka.dispatch.{ExecutionContext, Promise, Future}
 import akka.actor.ActorSystem
+import akka.event.Logging
 
 
 /**
@@ -18,13 +19,16 @@ trait DNAMap[T] {
   def update(key: DNASeq, v: T)
   def update(key: DNASeq, v0: T, f: T => T)
   def putNew(key: DNASeq,  v: T)
-  def deleteAll(p: (DNASeq, T) => Boolean)
+  def deleteAll(p: (DNASeq, T) => Boolean): Future[Unit]
   def contains(key: DNASeq): Future[Boolean]
-  def foreach(f: ((DNASeq, T)) => Unit): Future[Unit]
+  def mapReduce[T1, T2](map: ((DNASeq, T)) => Option[T1], reduce: Seq[T1] => T2) : Future[T2]
+  def foreach(f: ((DNASeq, T)) => Unit): Future[Unit] = mapReduce(p => {f(p); None}, (_:Seq[Unit]) => ())
 }
 
-class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], ec: ExecutionContext) extends DNAMap[T] {
+class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], as: ActorSystem) extends DNAMap[T] {
   import ArrayDNAMap._
+
+  val logger = Logging(as, classOf[ArrayDNAMap[T]])
   
   //TODO fix resize policy
 
@@ -167,9 +171,11 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], ec: ExecutionContex
     rescale()
   }
 
-  def deleteAll(p: (DNASeq, T) => Boolean) {
-    container.deleteAll(p)
-    rescale()
+  def deleteAll(p: (DNASeq, T) => Boolean) = {
+    Future {
+      container.deleteAll(p)
+      rescale()
+    }
   }
   
   def rescale() {
@@ -178,6 +184,7 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], ec: ExecutionContex
       while (newBins * maxLoadFactor < size) {
         newBins *= 2
       }
+      logger.info("rescaling to " + newBins)
       val newContainer = new Container(newBins)
       for ((key, v) <- container.iterator) {
         newContainer.putNew(key, v)
@@ -188,8 +195,8 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], ec: ExecutionContex
   
   def contains(key: DNASeq) = apply(key).map(_.isDefined)
   
-  def foreach(f: ((DNASeq, T)) => Unit): Future[Unit] = Future {
-    container.iterator.foreach(f)
+  def mapReduce[T1, T2](f: ((DNASeq, T)) => Option[T1], reduce: Seq[T1] => T2): Future[T2] = Future {
+    reduce(container.iterator.flatMap(f(_).toIterator).toSeq)
   }
 
 }

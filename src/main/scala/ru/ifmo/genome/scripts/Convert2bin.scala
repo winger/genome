@@ -6,14 +6,14 @@ import ru.ifmo.genome.data.PairedEndData
 import ru.ifmo.genome.dna._
 import ru.ifmo.genome.util.ConsoleProgress
 import sun.nio.ch.ChannelInputStream
+import akka.event.Logging
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
 
 object Convert2bin extends App {
-  val (logger, formatter) = ZeroLoggerFactory.newLogger(Convert2bin)
-  import formatter._
+  val logger = Logging(ActorsHome.system, getClass.getSimpleName)
 
   val infile = new File(args(0))
   val outfile = new File(args(1) + ".bin")

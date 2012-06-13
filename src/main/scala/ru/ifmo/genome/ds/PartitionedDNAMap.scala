@@ -1,19 +1,33 @@
 package ru.ifmo.genome.ds
 
 import ru.ifmo.genome.dna.DNASeq
-import akka.actor.{TypedProps, TypedActor, ActorSystem}
 import akka.dispatch.Future
-import sys.Prop.Creator
+import akka.remote.RemoteScope
+import akka.actor._
+import akka.japi.Creator
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
 
-class PartitionedDNAMap[T](k: Byte, partitionsCount: Int)(implicit mf: Manifest[T], as: ActorSystem) extends DNAMap[T] {
-  assert((partitionsCount & (partitionsCount - 1)) == 0)
+class PartitionedDNAMap[T](k: Byte)(implicit mf: Manifest[T]) extends DNAMap[T] with Serializable {
+  import ru.ifmo.genome.scripts.ActorsHome.system
 
-  val partitions: Array[DNAMap[T]] =
-    Array.fill(partitionsCount)(TypedActor(as).typedActorOf(TypedProps[DNAMap[T]](classOf[DNAMap[T]], new ArrayDNAMap[T](k))))
+  import collection.JavaConverters._
+  val partitions: Seq[DNAMap[T]] = {
+    val nodes = system.settings.config.getStringList("genome.storageNodes").asScala.map(AddressFromURIString(_))
+
+    val constructor = new Creator[DNAMap[T]] with Serializable {
+      def create() = new ArrayDNAMap[T](k)
+    }
+
+    nodes.map { address =>
+      val props = new TypedProps[DNAMap[T]](classOf[DNAMap[T]], constructor) {
+        override def actorProps() = super.actorProps().withDeploy(Deploy(scope = RemoteScope(address)))
+      }
+      TypedActor(system).typedActorOf(props)
+    }
+  }.toSeq
 //  val partitions: Array[DNAMap[T]] = Array.fill(partitionsCount)(new ArrayDNAMap[T](k))
 
   def size = partitions.map(_.size).sum
@@ -34,15 +48,18 @@ class PartitionedDNAMap[T](k: Byte, partitionsCount: Int)(implicit mf: Manifest[
     partition(key).putNew(key, v)
   }
   
-  def deleteAll(p: (DNASeq, T) => Boolean) {
-    partitions.foreach(_.deleteAll(p))
+  def deleteAll(p: (DNASeq, T) => Boolean): Future[Unit] = {
+    Future.traverse(partitions)(_.deleteAll(p)).map(_ => ())
   }
 
   def contains(key: DNASeq) = partition(key).contains(key)
 
-  def foreach(f: ((DNASeq, T)) => Unit) = Future.traverse(partitions.toList)(_.foreach(f)).map(_ => ())
+  def mapReduce[T1, T2](map: ((DNASeq, T)) => Option[T1], reduce: Seq[T1] => T2) = {
+    Future.traverse(partitions)(_.mapReduce(map, identity[Seq[T1]])).map(list => reduce(list.flatten))
+  }
   
   private def partition(key: DNASeq): DNAMap[T] = {
-    partitions(key.hashCode & (partitionsCount - 1))
+    def fix(i: Int) = if (i < 0) i + partitions.size else i
+    partitions(fix(key.hashCode % partitions.size))
   }
 }

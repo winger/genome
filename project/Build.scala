@@ -10,7 +10,8 @@ object PegasBuild extends Build {
     base = file("."),
     settings = (defaultSettings ++ AkkaKernelPlugin.distSettings ++ Seq(
       distJvmOptions in Dist := "-Xmx1G",
-      outputDirectory in Dist := file("target/dist")
+      outputDirectory in Dist := file("target/dist"),
+      exportJars := true
     )).asInstanceOf[Seq[Project.Setting[_]]]
   )
 
@@ -21,22 +22,20 @@ object PegasBuild extends Build {
     crossPaths := false
   )
 
-  lazy val AkkaVersion = "2.0.1"
+  lazy val AkkaVersion = "2.1-SNAPSHOT"
 
   lazy val defaultSettings = buildSettings ++ Seq(
     resolvers ++= Seq(
-      "Typesafe Repository" at "http://repo.typesafe.com/typesafe/releases/",
+      "Typesafe Repository" at "http://repo.typesafe.com/typesafe/snapshots/",
       "Scala Tools Snapshots" at "http://scala-tools.org/repo-snapshots/",
       "ScalaNLP Maven2" at "http://repo.scalanlp.org/repo"
     ),
     libraryDependencies ++= Seq(
       "com.typesafe.akka" % "akka-kernel" % AkkaVersion,
+      "com.typesafe.akka" % "akka-remote" % AkkaVersion,
       "com.typesafe.akka" % "akka-slf4j" % AkkaVersion,
-      "ch.qos.logback" % "logback-classic" % "1.0.0",
-      "com.dongxiguo" %% "zero-log" % "0.1.1",
-      "com.jsuereth" %% "scala-arm" % "1.2",
-      "javax.transaction" % "jta" % "1.0.1B" % "provided->default",
-      "org.scalala" %% "scalala" % "1.0.0.RC2-SNAPSHOT"
+      "ch.qos.logback" % "logback-classic" % "1.0.0"
+//      , "org.scalala" %% "scalala" % "1.0.0.RC2-SNAPSHOT"
     ),
     // compile options
     scalacOptions ++= Seq("-encoding", "UTF-8", "-deprecation", "-unchecked"),

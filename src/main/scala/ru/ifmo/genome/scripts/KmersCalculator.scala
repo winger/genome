@@ -7,14 +7,14 @@ import ru.ifmo.genome.dna._
 import ru.ifmo.genome.util.ConsoleProgress
 import sun.nio.ch.ChannelInputStream
 import io.Source
+import akka.event.Logging
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
 
 object KmersCalculator extends App {
-  val (logger, formatter) = ZeroLoggerFactory.newLogger(Convert2bin)
-  import formatter._
+  val logger = Logging(ActorsHome.system, getClass.getSimpleName)
 
   val infile = new File(args(0))
 
