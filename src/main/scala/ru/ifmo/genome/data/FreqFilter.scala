@@ -6,6 +6,8 @@ import ru.ifmo.genome.ds.{DNAMap, PartitionedDNAMap}
 import ru.ifmo.genome.scripts.ActorsHome._
 import akka.event.Logging
 import ru.ifmo.genome.scripts.ActorsHome
+import akka.util.Duration
+import akka.dispatch.{Future, Promise, Await}
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
@@ -14,14 +16,14 @@ import ru.ifmo.genome.scripts.ActorsHome
 object FreqFilter {
   val logger = Logging(ActorsHome.system, getClass.getSimpleName)
 
-  val chunkSize = 1024
+  val chunkSize = ActorsHome.chunkSize
 
   def extractFilteredKmers(data: PairedEndData, k: Byte, rounds: Int) = {
     val kmersFreq: DNAMap[Int] = new PartitionedDNAMap[Int](k)
 
     def add(seq: DNASeq) {
       if (seq.length >= k) {
-        for (x <- seq.sliding(k)) {
+        for (x <- seq.sliding(k).toSeq) {
           val rcx = x.revComplement
           val y = if (x.hashCode < rcx.hashCode) x else rcx
           kmersFreq.update(y, 1, _ + 1)
@@ -34,8 +36,9 @@ object FreqFilter {
     val max = 8326576
 
     var count = 0
+
     for (chunk <- data.getPairs.take(max).grouped(chunkSize)) {
-      for ((p1, p2) <- chunk.par) {
+      for ((p1, p2) <- chunk) {
         add(p1)
         add(p2)
       }
@@ -45,7 +48,7 @@ object FreqFilter {
 
     progress.done()
 
-    kmersFreq.deleteAll((k, v) => v < rounds)
+    Await.ready(kmersFreq.deleteAll((k, v) => v < rounds), Duration.Inf)
 
     kmersFreq
   }

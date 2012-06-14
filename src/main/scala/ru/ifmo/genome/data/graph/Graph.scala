@@ -263,7 +263,7 @@ class MapGraph extends Graph with KryoSerializable {
 object Graph {
   val logger = Logging(ActorsHome.system, getClass.getSimpleName)
 
-  val chunkSize = 1024
+  val chunkSize = ActorsHome.chunkSize
 
   def buildGraph(k: Byte, kmersFreq : DNAMap[Int]): Graph = {
     def contains(x: DNASeq) = Await.result(kmersFreq.contains(x), Duration.Inf) || Await.result(kmersFreq.contains(x.revComplement), Duration.Inf)
@@ -353,7 +353,7 @@ object Graph {
         var length = 1
         while (!nodeMap.contains(seq)) {
           val out = outcoming(seq)
-          assert(out.size == 1, seq + " " + out.toSeq)
+          assert(out.size == 1, seq + " " + out.toSeq + " " + termKmers(seq))
           builder += out(0)
           length += 1
           seq = seq.drop(1) :+ out(0)
@@ -365,7 +365,7 @@ object Graph {
 
     var count = 0d
     for (chunk <- termKmers.iterator.grouped(chunkSize)) {
-      for (read <- chunk) {
+      for (read <- chunk.par) {
         buildEdges(read)
       }
       count += chunk.size

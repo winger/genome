@@ -24,5 +24,7 @@ object ActorsHome {
   val logger = Logging(system, getClass.getSimpleName)
   logger.info("" + (conf.root().get("genome")))
 
+  val chunkSize = conf.getInt("genome.chunkSize")
+
   def main(args: Array[String]) {}
 }

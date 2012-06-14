@@ -3,14 +3,45 @@ package ru.ifmo.genome.ds
 import java.nio.ByteBuffer
 import ru.ifmo.genome.dna.DNASeq
 import collection.mutable.BitSet
-import akka.dispatch.{ExecutionContext, Promise, Future}
-import akka.actor.ActorSystem
+import akka.dispatch.{ Promise, Future}
 import akka.event.Logging
+import akka.actor.{Actor, ActorSystem}
+import akka.pattern._
 
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
+
+object Messages {
+  sealed trait DNAMapMessages
+
+  case object size extends DNAMapMessages
+  case class apply(key: DNASeq) extends DNAMapMessages
+  case class getAll(key: DNASeq) extends DNAMapMessages
+  case class update[T](key: DNASeq, v: T) extends DNAMapMessages
+  case class update1[T](key: DNASeq, v0: T, f: T => T) extends DNAMapMessages
+  case class putNew[T](key: DNASeq,  v: T) extends DNAMapMessages
+  case class deleteAll[T](p: (DNASeq, T) => Boolean) extends DNAMapMessages
+  case class contains[T](key: DNASeq) extends DNAMapMessages
+  case class mapReduce[T, T1, T2](map: ((DNASeq, T)) => Option[T1], reduce: Seq[T1] => T2) extends DNAMapMessages
+}
+
+trait DNAMapActor[T] extends Actor {
+  self: DNAMap[T] =>
+  def receive = {
+    case Messages.size => size pipeTo sender
+    case Messages.apply(key) => apply(key) pipeTo sender
+    case Messages.getAll(key) => getAll(key) pipeTo sender
+    case Messages.update(key, v: T) => update(key, v)
+    case Messages.update1(key, v: T, f: (T => T)) => update(key, v, f)
+    case Messages.putNew(key, v: T) => putNew(key, v)
+    case Messages.deleteAll(p: ((DNASeq, T) => Boolean)) => deleteAll(p) pipeTo sender
+    case Messages.contains(key) => contains(key) pipeTo sender
+    case Messages.mapReduce(map: (((DNASeq, T)) => Option[_]), reduce: Function1[Seq[_], _]) =>
+      mapReduce(map, reduce) pipeTo sender
+  }
+}
 
 trait DNAMap[T] {
   def size: Future[Int]
@@ -153,29 +184,30 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], as: ActorSystem) ex
     Promise successful container.getAll(key)
   }
   
-  def update(key: DNASeq, v: T) {
+  def update(key: DNASeq, v: T) = {
     assert(key.length == k)
     container.update(key, v)
     rescale()
+    Promise successful ()
   }
 
-  def update(key: DNASeq, v0: T, update: T => T) {
+  def update(key: DNASeq, v0: T, update: T => T) = {
     assert(key.length == k)
     container.update(key, v0, update)
     rescale()
+    Promise successful ()
   }
 
-  def putNew(key: DNASeq, v: T) {
+  def putNew(key: DNASeq, v: T) = {
     assert(key.length == k)
     container.putNew(key, v)
     rescale()
+    Promise successful ()
   }
 
-  def deleteAll(p: (DNASeq, T) => Boolean) = {
-    Future {
-      container.deleteAll(p)
-      rescale()
-    }
+  def deleteAll(p: (DNASeq, T) => Boolean) = Future {
+    container.deleteAll(p)
+    rescale()
   }
   
   def rescale() {
@@ -197,6 +229,7 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], as: ActorSystem) ex
   
   def mapReduce[T1, T2](f: ((DNASeq, T)) => Option[T1], reduce: Seq[T1] => T2): Future[T2] = Future {
     reduce(container.iterator.flatMap(f(_).toIterator).toList)
+//    for TODO
   }
 
 }
