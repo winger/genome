@@ -14,7 +14,7 @@ class PartitionedDNAMap[T](k: Byte)(implicit mf: Manifest[T]) extends DNAMap[T] 
   import ru.ifmo.genome.scripts.ActorsHome.system
 
   import collection.JavaConverters._
-  val partitions: Seq[DNAMap[T]] = {
+  val partitions: Array[DNAMap[T]] = {
     val nodes = system.settings.config.getStringList("genome.storageNodes").asScala.map(AddressFromURIString(_))
 
     val constructor = new Creator[DNAMap[T]] with Serializable {
@@ -27,10 +27,10 @@ class PartitionedDNAMap[T](k: Byte)(implicit mf: Manifest[T]) extends DNAMap[T] 
       }
       TypedActor(system).typedActorOf(props)
     }
-  }.toSeq
+  }.toArray
 //  val partitions: Array[DNAMap[T]] = Array.fill(partitionsCount)(new ArrayDNAMap[T](k))
 
-  def size = Future.traverse(partitions)(_.size).map(_.sum)
+  def size = Future.traverse(partitions.toList)(_.size).map(_.sum)
 
   def apply(key: DNASeq) = partition(key).apply(key)
 
@@ -49,13 +49,13 @@ class PartitionedDNAMap[T](k: Byte)(implicit mf: Manifest[T]) extends DNAMap[T] 
   }
   
   def deleteAll(p: (DNASeq, T) => Boolean): Future[Unit] = {
-    Future.traverse(partitions)(_.deleteAll(p)).map(_ => ())
+    Future.traverse(partitions.toList)(_.deleteAll(p)).map(_ => ())
   }
 
   def contains(key: DNASeq) = partition(key).contains(key)
 
   def mapReduce[T1, T2](map: ((DNASeq, T)) => Option[T1], reduce: Seq[T1] => T2) = {
-    Future.traverse(partitions)(_.mapReduce(map, identity[Seq[T1]])).map(list => reduce(list.flatten))
+    Future.traverse(partitions.toList)(_.mapReduce(map, identity[Seq[T1]])).map(list => reduce(list.flatten))
   }
   
   private def partition(key: DNASeq): DNAMap[T] = {

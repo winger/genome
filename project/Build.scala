@@ -26,10 +26,10 @@ object PegasBuild extends Build {
 
   lazy val defaultSettings = buildSettings ++ Seq(
     resolvers ++= Seq(
+      "Local Maven Repository" at "file://"+Path.userHome.absolutePath+"/.m2/repository",
       "Typesafe Repository" at "http://repo.typesafe.com/typesafe/snapshots/",
       "Scala Tools Snapshots" at "http://scala-tools.org/repo-snapshots/",
-      "ScalaNLP Maven2" at "http://repo.scalanlp.org/repo",
-      "Local Maven Repository" at "file://"+Path.userHome.absolutePath+"/.m2/repository"
+      "ScalaNLP Maven2" at "http://repo.scalanlp.org/repo"
     ),
     libraryDependencies ++= Seq(
       "com.typesafe.akka" % "akka-kernel" % AkkaVersion,

@@ -13,7 +13,7 @@ import akka.util.Duration
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
  */
 
-object GraphBuilder extends Bootable {
+class GraphBuilder extends Bootable {
 
   def startup() {
     val logger = Logging(ActorsHome.system, getClass.getSimpleName)
@@ -59,6 +59,8 @@ object GraphBuilder extends Bootable {
   }
 
   def shutdown() {}
+}
   
-  def main(args: Array[String]) {startup()}
+object GraphBuilder {
+  def main(args: Array[String]) {new GraphBuilder().startup()}
 }
