@@ -7,6 +7,7 @@ import akka.dispatch.{ Promise, Future}
 import akka.event.Logging
 import akka.actor.{Actor, ActorSystem}
 import akka.pattern._
+import ru.ifmo.genome.scripts.ActorsHome
 
 
 /**
@@ -16,7 +17,7 @@ import akka.pattern._
 object Messages {
   sealed trait DNAMapMessages
 
-  case object size extends DNAMapMessages
+  case class size() extends DNAMapMessages
   case class apply(key: DNASeq) extends DNAMapMessages
   case class getAll(key: DNASeq) extends DNAMapMessages
   case class update[T](key: DNASeq, v: T) extends DNAMapMessages
@@ -30,7 +31,7 @@ object Messages {
 trait DNAMapActor[T] extends Actor {
   self: DNAMap[T] =>
   def receive = {
-    case Messages.size => size pipeTo sender
+    case Messages.size() => size pipeTo sender
     case Messages.apply(key) => apply(key) pipeTo sender
     case Messages.getAll(key) => getAll(key) pipeTo sender
     case Messages.update(key, v: T) => update(key, v)
@@ -228,8 +229,12 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], as: ActorSystem) ex
   def contains(key: DNASeq) = apply(key).map(_.isDefined)
   
   def mapReduce[T1, T2](f: ((DNASeq, T)) => Option[T1], reduce: Seq[T1] => T2): Future[T2] = Future {
-    reduce(container.iterator.flatMap(f(_).toIterator).toList)
-//    for TODO
+    //reduce(container.iterator.flatMap(f(_).toIterator).toList)
+    val list = {
+      for (chunk <- container.iterator.grouped(ActorsHome.chunkSize))
+        yield chunk.par.map(f(_)).flatten.seq
+    }.flatten
+    reduce(list.toSeq)
   }
 
 }
