@@ -36,11 +36,17 @@ class PartitionedDNAMap[T](k: Byte)(implicit mf: Manifest[T]) extends DNAMap[T] 
 
   def getAll(key: DNASeq) = (partition(key) ? Messages.getAll(key)).mapTo[List[T]]
 
-  def update(key: DNASeq, v: T) = (partition(key) ? Messages.update(key, v)).mapTo[Unit]
+  def update(key: DNASeq, v: T) {
+    partition(key) ! Messages.update(key, v)
+  }
 
-  def update(key: DNASeq, v0: T, f: (T) => T) = (partition(key) ? Messages.update1(key, v0, f)).mapTo[Unit]
+  def update(key: DNASeq, v0: T, f: (T) => T) {
+    partition(key) ! Messages.update1(key, v0, f)
+  }
 
-  def putNew(key: DNASeq, v: T) = (partition(key) ? Messages.putNew(key, v)).mapTo[Unit]
+  def putNew(key: DNASeq, v: T) {
+    partition(key) ! Messages.putNew(key, v)
+  }
   
   def deleteAll(p: (DNASeq, T) => Boolean): Future[Unit] = {
     Future.traverse(partitions.toList)(_ ? Messages.deleteAll(p)).map(_ => ())
