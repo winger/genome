@@ -7,7 +7,6 @@ import akka.actor._
 import akka.pattern.ask
 import akka.util.Timeout
 import akka.util.duration._
-import java.util.concurrent.Semaphore
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
@@ -16,11 +15,10 @@ import java.util.concurrent.Semaphore
 class PartitionedDNAMap[T](k: Byte)(implicit mf: Manifest[T]) extends DNAMap[T] with Serializable {
   import ru.ifmo.genome.scripts.ActorsHome.system
 
-  import collection.JavaConverters._
-
   implicit val timeout = Timeout(1000000 seconds)
 
   val partitions: Array[ActorRef] = {
+    import collection.JavaConverters._
     val nodes = system.settings.config.getStringList("genome.storageNodes").asScala.map(AddressFromURIString(_))
 
     nodes.map { address =>
@@ -30,7 +28,7 @@ class PartitionedDNAMap[T](k: Byte)(implicit mf: Manifest[T]) extends DNAMap[T] 
   }.toArray
 //  val partitions: Array[DNAMap[T]] = Array.fill(partitionsCount)(new ArrayDNAMap[T](k))
 
-  def size = Future.traverse(partitions.toList)(_ ? Messages.size).mapTo[List[Int]].map(_.sum)
+  def size = Future.traverse(partitions.toList)(_ ? Messages.size()).mapTo[List[Int]].map(_.sum)
 
   def apply(key: DNASeq) = (partition(key) ? Messages.apply(key)).mapTo[Option[T]]
 

@@ -1,11 +1,5 @@
 package ru.ifmo.genome.data.graph
 
-import ru.ifmo.genome.dna.{Base, DNASeq}
-import com.esotericsoftware.kryo.io.{Output, Input}
-import com.esotericsoftware.kryo.{Serializer, DefaultSerializer, Kryo, KryoSerializable}
-import java.lang.Class
-
-
 /**
  *
  * @author Vladislav Isenbaev (vladislav.isenbaev@odnoklassniki.ru)
@@ -13,6 +7,6 @@ import java.lang.Class
 
 sealed abstract class GraphPosition
 
-case class NodeGraphPosition(node: Node) extends GraphPosition
+case class NodeGraphPosition(nodeId: Long) extends GraphPosition
 
-case class EdgeGraphPosition(edge: Edge, dist: Int) extends GraphPosition
+case class EdgeGraphPosition(edgeId: Long, dist: Int) extends GraphPosition

@@ -2,12 +2,16 @@ package ru.ifmo.genome.data
 
 import ru.ifmo.genome.dna.DNASeq
 import ru.ifmo.genome.util.ConsoleProgress
-import ru.ifmo.genome.ds.{DNAMap, PartitionedDNAMap}
 import ru.ifmo.genome.scripts.ActorsHome._
 import akka.event.Logging
 import ru.ifmo.genome.scripts.ActorsHome
-import akka.util.Duration
 import akka.dispatch.{Future, Promise, Await}
+import ru.ifmo.genome.ds.{Messages, DNAMap, PartitionedDNAMap}
+import akka.pattern.ask
+import akka.util.{Timeout, Duration}
+import akka.util.duration._
+import akka.remote.RemoteScope
+import akka.actor.{AddressFromURIString, Deploy, Props, Actor}
 
 /**
  * Author: Vladislav Isenbaev (isenbaev@gmail.com)
@@ -33,7 +37,7 @@ object FreqFilter {
 
     val progress = new ConsoleProgress("kmers", 80)
 
-    val max = 8326576
+    val max = ActorsHome.conf.root.toConfig.getInt("genome.takeFirst")
 
     var count = 0
 
@@ -49,7 +53,7 @@ object FreqFilter {
     progress.done()
 
     Await.ready(kmersFreq.deleteAll((k, v) => v < rounds), Duration.Inf)
-
+    
     kmersFreq
   }
 

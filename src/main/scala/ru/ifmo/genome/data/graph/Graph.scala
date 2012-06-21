@@ -91,29 +91,30 @@ trait Graph {
     val k = getNodes.head.seq.size.toByte
     val nodeMap = new PartitionedDNAMap[GraphPosition](k)
     def add(seq: DNASeq, pos: GraphPosition) {
-//      val s0 = nodeMap.size
       nodeMap.putNew(seq, pos)
-//      assert(nodeMap.size - s0 == 1)
     }
     val total = getEdges.map(_.seq.size).sum + getNodes.size - getEdges.size
     val progress = new ConsoleProgress("Node map", 80)
+    var count = 0
     for (node <- getNodes) {
-      add(node.seq, new NodeGraphPosition(node))
-      progress(Await.result(nodeMap.size, Duration.Inf).toDouble / total)
+      add(node.seq, new NodeGraphPosition(node.id))
+      count += 1
+      progress(count.toDouble / total)
     }
     for (edge <- getEdges) {
       val start = edge.seq.head
       var seq = edge.start.seq.drop(1) :+ start
       var dist = 1
       for (base <- edge.seq.tail) {
-        add(seq, new EdgeGraphPosition(edge, dist))
+        add(seq, new EdgeGraphPosition(edge.id, dist))
         seq = seq.drop(1) :+ base
         dist += 1
       }
-      progress(Await.result(nodeMap.size, Duration.Inf).toDouble / total)
+      count += dist
+      progress(count.toDouble / total)
     }
     progress.done()
-    println(nodeMap.size + " " + total)
+    println(Await.result(nodeMap.size, Duration.Inf) + " " + total)
     nodeMap
   }
 

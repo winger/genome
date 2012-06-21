@@ -52,18 +52,23 @@ object Convert2bin extends App {
       if (in.readLine() == null) {
         false
       } else {
-        val (line1, line2) = in.readLine().splitAt(n)
-        in.readLine()
-        val (quality1, quality2) = in.readLine().splitAt(n)
-        val seq1 = filtered(line1 zip quality1)
-        val seq2 = filtered(line2 zip quality2)
-        if (seq1.length < k || seq2.length < k) {
-          shortReads += 1
+        val line = in.readLine()
+        if (line == null) {
+          false
+        } else {
+          val (line1, line2) = line.splitAt(n)
+          in.readLine()
+          val (quality1, quality2) = in.readLine().splitAt(n)
+          val seq1 = filtered(line1 zip quality1)
+          val seq2 = filtered(line2 zip quality2)
+          if (seq1.length < k || seq2.length < k) {
+            shortReads += 1
+          }
+          write(seq1)
+          write(seq2)
+          progress(inCh.position().toDouble / inCh.size())
+          true
         }
-        write(seq1)
-        write(seq2)
-        progress(inCh.position().toDouble / inCh.size())
-        true
       }
     }
 

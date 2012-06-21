@@ -26,7 +26,7 @@ class GraphBuilder extends Bootable {
     val outfile = new File(config.getString("genome.outputFile"))
   
     val data = PairedEndData(infile)
-    val k = 19.toByte
+    val k = config.getInt("genome.k").toByte
     val rounds = 3
   
     val kmersFreq = FreqFilter.extractFilteredKmers(data, k, rounds)

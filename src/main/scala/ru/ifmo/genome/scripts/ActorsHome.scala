@@ -22,7 +22,7 @@ object ActorsHome {
   implicit val system = ActorSystem()
 
   val logger = Logging(system, getClass.getSimpleName)
-  logger.info("" + (conf.root().get("genome")))
+  logger.info("" + (conf.root.get("genome")))
 
   val chunkSize = conf.getInt("genome.chunkSize")
 

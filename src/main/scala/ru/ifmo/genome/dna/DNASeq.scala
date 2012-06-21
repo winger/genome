@@ -9,6 +9,8 @@ import collection.{GenSeqLike, IndexedSeqLike}
 import collection.generic.{SeqFactory, CanBuildFrom}
 import ru.ifmo.genome.dna.DNASeq.GenCanBuildFrom
 import java.nio.ByteBuffer
+import com.esotericsoftware.kryo.DefaultSerializer
+import com.esotericsoftware.kryo.serializers.FieldSerializer
 
 /**
  * @author Vladislav Isenbaev (vladislav.isenbaev@odnoklassniki.ru)
@@ -34,6 +36,7 @@ abstract class DNASeq extends IndexedSeq[Base] with IndexedSeqLike[Base, DNASeq]
   }
 }
 
+@DefaultSerializer(classOf[FieldSerializer[_]])
 class ArrayDNASeq(val data: Array[Byte], val length: Int) extends DNASeq {
   import DNASeq._
 
@@ -67,6 +70,7 @@ class ArrayDNASeq(val data: Array[Byte], val length: Int) extends DNASeq {
   }
 }
 
+@DefaultSerializer(classOf[FieldSerializer[_]])
 class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
   import DNASeq._
 
@@ -164,6 +168,7 @@ class Long1DNASeq(val long: Long, val len: Byte) extends DNASeq {
   }
 }
 
+@DefaultSerializer(classOf[FieldSerializer[_]])
 class Long2DNASeq(val long1: Long, val long2: Long, val len: Byte) extends DNASeq {
   import DNASeq._
 

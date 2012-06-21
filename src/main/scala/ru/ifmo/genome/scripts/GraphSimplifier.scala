@@ -6,42 +6,146 @@ import ru.ifmo.genome.util.ConsoleProgress
 import ru.ifmo.genome.dna.DNASeq
 import scala.collection.parallel.ParSeq
 import scala.collection.immutable.Range.Inclusive
-import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicInteger
 import akka.event.Logging
 import akka.kernel.Bootable
+import akka.actor._
+import akka.pattern.{ask, pipe}
+import akka.remote.RemoteScope
+import akka.util.{Timeout, Duration}
+import akka.util.duration._
+import akka.dispatch.{Future, Await}
+import java.util.concurrent.atomic.{AtomicLong, AtomicInteger}
+import akka.event.slf4j.SLF4JLogging
+import collection.mutable.{Set, PriorityQueue}
+import collection.immutable.List
+import java.util.concurrent.{Semaphore, CountDownLatch, ConcurrentHashMap}
 
 //import scalala.library.Plotting._
 //import scalala.tensor.dense.DenseVector
 import java.io._
 import scala._
-import collection.mutable.{SynchronizedMap, PriorityQueue}
 import scala.Predef._
-import akka.dispatch.Await
-import akka.util.Duration
 
 /**
 * Author: Vladislav Isenbaev (isenbaev@gmail.com)
 */
 
-object GraphSimplifier extends Bootable {
+class WalkingActor(range_ : (Int, Int), graph_ : Graph) extends Actor {
+  implicit val graph = graph_
+  import context.dispatcher
+
+  val logger = Logging(context.system, this)
+
+  val range = range_._1 to range_._2
+
+  val cache = new collection.mutable.LinkedHashMap[Node, collection.Map[Node, Int]]()
+
+  def reachable(node: Node): collection.Map[Node, Int] = {
+    if (cache.contains(node)) {
+      cache(node)
+    } else {
+      var queue = new PriorityQueue[(Int, Node)]()(new Ordering[(Int, Node)]{
+        def compare(x: (Int, Node), y: (Int, Node)): Int = {
+          y._1 - x._1
+        }
+      })
+      var set = collection.mutable.Map[Node, Int]()
+      queue += 0 -> node
+      while (!queue.isEmpty) {
+        val (dist, u) = queue.dequeue()
+        if (!set.contains(u)) {
+          set += u -> dist
+          for (edge <- u.inEdges) {
+            val dist2 = dist + edge.seq.length
+            if (dist2 <= range.last) {
+              queue += dist2 -> edge.start
+            }
+          }
+        }
+      }
+      //TODO: use LRU cache
+      if (cache.size < 50000) {
+        cache += node -> set
+      }
+      set
+    }
+  }
+
+  var processed = new AtomicInteger(0)
+  var totalTime = new AtomicLong(0L)
+
+  def receive = {
+    case (pos1: GraphPosition, pos2: GraphPosition) => Future {
+      val time0 = System.nanoTime
+      var pathEdges = collection.mutable.Set[(Long, Long)]()
+      val (node2, dist2) = pos2 match {
+        case NodeGraphPosition(nodeId) => (graph.getNode(nodeId), 0)
+        case EdgeGraphPosition(edgeId, dist) =>
+          (graph.getEdge(edgeId).start, dist)
+      }
+      val startEdge = pos1 match { case EdgeGraphPosition(edgeId, _) => graph.getEdge(edgeId); case _ => null }
+      val endEdge = pos2 match { case EdgeGraphPosition(edgeId, _) => graph.getEdge(edgeId); case _ => null }
+      val reachableSet = reachable(node2)
+      val memo = collection.mutable.Map[(Edge, Int), Boolean]()
+      def dfs(node1: Node, dist1: Int, prevEdge: Edge): Boolean = {
+        if (memo.contains((prevEdge, dist1))) {
+          memo((prevEdge, dist1))
+        } else if (dist1 + dist2 + reachableSet.getOrElse(node1, range.last + 1) > range.last) {
+          false
+        } else {
+          var cur = if (node1 == node2 && range.contains(dist1 + dist2)) {
+            if (prevEdge != null && endEdge != null) {
+              pathEdges += prevEdge.id -> endEdge.id
+            }
+            true
+          } else false
+          node1.outEdges.values.foreach { e =>
+            val res = dfs(e.end, dist1 + e.seq.length, e)
+            if (res && prevEdge != null) {
+              pathEdges += prevEdge.id -> e.id
+            }
+            cur |= res
+          }
+          memo((prevEdge, dist1)) = cur
+          cur
+        }
+      }
+      val (node0, dist0) = pos1 match {
+        case NodeGraphPosition(nodeId) => (graph.getNode(nodeId), 0)
+        case EdgeGraphPosition(edgeId, dist) =>
+          (graph.getEdge(edgeId).end, graph.getEdge(edgeId).seq.length - dist)
+      }
+      val ret = (dfs(node0, dist0, startEdge), pathEdges)
+      val processedNew = processed.incrementAndGet()
+      val totalTimeNew = totalTime.getAndAdd(System.nanoTime - time0)
+      if (processedNew % 10000 == 0) {
+        logger.info("Processed " + processedNew + " events, average time is " + (totalTimeNew.toDouble / processedNew))
+      }
+      ret
+    } pipeTo sender
+  }
+}
+
+class GraphSimplifier extends Bootable {
   val logger = Logging(ActorsHome.system, getClass.getSimpleName)
 
   def startup() {
     import ActorsHome.system
   
     logger.info("Started")
+
+    implicit val timeout = Timeout(1000000 seconds)
     
-    val config = system.settings.config.getConfig("genome")
+    val config = system.settings.config.root().toConfig.getConfig("genome")
   
     val infile = new File(config.getString("inputFile"))
     val datafile = new File(config.getString("dataFile"))
     val outfile = new File(config.getString("outputFile"))
     val graphfile = new File(config.getString("graphFile"))
   
-    val range: Inclusive = 180 to 250
+    implicit val range: Inclusive = 180 to 250
   //  val range: Inclusive = 160 to 270
-    val cutoff = 200
+    val cutoff = ActorsHome.conf.root.toConfig.getInt("genome.cutoff")
   
     val data = PairedEndData(datafile)
   
@@ -53,7 +157,8 @@ object GraphSimplifier extends Bootable {
       System.gc()
   
       for (edge <- graph.getEdges) {
-        assert(edge.start.outEdgeIds(edge.seq(0)) == edge.id && edge.end.inEdgeIds(edge.id))
+        assert(edge.start.outEdgeIds(edge.seq(0)) == edge.id && edge.end.inEdgeIds(edge.id),
+          edge + " " + edge.start + " " + edge.end)
       }
       for (node <- graph.getNodes) {
         for (edge <- node.inEdges) {
@@ -63,70 +168,29 @@ object GraphSimplifier extends Bootable {
           assert(edge.start == node && edge.seq(0) == base)
         }
       }
-  
-      val cache = new collection.mutable.HashMap[Node, collection.Map[Node, Int]]() with SynchronizedMap[Node, collection.Map[Node, Int]]
-      def reachable(node: Node): collection.Map[Node, Int] = {
-        if (cache.contains(node)) {
-          cache(node)
-        } else {
-          var queue = new PriorityQueue[(Int, Node)]()(new Ordering[(Int, Node)]{
-            def compare(x: (Int, Node), y: (Int, Node)): Int = {
-              y._1 - x._1
-            }
-          })
-          var set = collection.mutable.Map[Node, Int]()
-          queue += 0 -> node
-          while (!queue.isEmpty) {
-            val (dist, u) = queue.dequeue()
-            if (!set.contains(u)) {
-              set += u -> dist
-              for (edge <- u.inEdges) {
-                val dist2 = dist + edge.seq.length
-                if (dist2 <= range.last) {
-                  queue += dist2 -> edge.start
-                }
-              }
-            }
+
+      val partitions: Array[ActorRef] = {
+        import collection.JavaConverters._
+        val nodes = system.settings.config.getStringList("genome.storageNodes").asScala.map(AddressFromURIString(_))
+
+        def creator(range: (Int, Int), graph: Graph) = {
+          new (() => WalkingActor) {
+            def apply() = new WalkingActor(range, graph)
           }
-          if (cache.size < 50000) {
-            cache += node -> set
-          }
-          set
         }
-      }
+
+        nodes.map { address =>
+          val props = Props(creator((range.head, range.last), graph)).withDeploy(Deploy(scope = RemoteScope(address)))
+          system.actorOf(props)
+        }
+      }.toArray
     
       val graphMap = graph.getGraphMap
-  
-      var notFoundPairs1, notFoundPairs2 = 0
-  
-      var annPairs: Iterator[(Iterable[GraphPosition], Iterable[GraphPosition])] = {
-        lazy val progress = new ConsoleProgress("walk pairs", 80)
-        var count = 0d
-        val annPairs = {
-          for (chunk <- data.getPairs.grouped(1024)) yield {
-            val chunkRes: ParSeq[Iterable[(Iterable[GraphPosition], Iterable[GraphPosition])]] = {
-              for ((p1: DNASeq, p2: DNASeq) <- chunk.par if p1.length >= k && p2.length >= k) yield {
-                if (!Await.result(graphMap.contains(p1.take(k)), Duration.Inf) || !Await.result(graphMap.contains(p2.take(k).revComplement), Duration.Inf)) {
-                  notFoundPairs1 += 1
-                }
-                if (!Await.result(graphMap.contains(p2.take(k)), Duration.Inf) || !Await.result(graphMap.contains(p1.take(k).revComplement), Duration.Inf)) {
-                  notFoundPairs2 += 1
-                }
-                Iterable(
-                  (Await.result(graphMap.getAll(p1.take(k)), Duration.Inf), Await.result(graphMap.getAll(p2.take(k).revComplement), Duration.Inf)),
-                  (Await.result(graphMap.getAll(p2.take(k)), Duration.Inf), Await.result(graphMap.getAll(p1.take(k).revComplement), Duration.Inf))
-                )
-              }
-            }
-            count += chunk.size
-            progress(count / data.count)
-            chunkRes.seq.flatten
-          }
-        }.flatten
-        annPairs
-      }
-    
-      annPairs = annPairs flatMap { case pair@(positions1, positions2) =>
+
+      val takeFirst = ActorsHome.conf.root.toConfig.getInt("genome.takeFirst")
+
+      def annotate(pair: (List[GraphPosition], List[GraphPosition])) = {
+        val (positions1, positions2) = pair
         val condition = positions1.exists {
           case EdgeGraphPosition(edge1, dist1) => positions2.exists {
             case EdgeGraphPosition(edge2, dist2) => edge1 == edge2 && range.contains((dist2 - dist1) + k)
@@ -140,78 +204,66 @@ object GraphSimplifier extends Bootable {
           Some(pair)
         }
       }
-    
-      {
-        var reachables = 0d
-  
-        import scala.collection.JavaConversions._
-        val pathsMap: collection.mutable.ConcurrentMap[(Edge, Edge), AtomicInteger] = new ConcurrentHashMap[(Edge, Edge), AtomicInteger]()
-    
-        var count = 0d
-        var badPairs = 0
-        for (chunk <- annPairs.grouped(1024)) {
-          for ((positions1, positions2) <- chunk.par) {
-            var pathEdges = collection.mutable.Set[(Edge, Edge)]()
-            val pairs = for (pos1 <- positions1; pos2 <- positions2) yield (pos1, pos2)
-            var good = false
-            pairs.foreach{ case (pos1, pos2) =>
-              val (node2, dist2) = pos2 match {
-                case NodeGraphPosition(n) => (n, 0)
-                case EdgeGraphPosition(edge, dist) =>
-                  (edge.start, dist)
+
+      import scala.collection.JavaConversions._
+      val pathsMap: collection.mutable.ConcurrentMap[(Long, Long), AtomicInteger] = new ConcurrentHashMap[(Long, Long), AtomicInteger]()
+
+      var badPairs = 0
+      lazy val progress = new ConsoleProgress("walk pairs", 80)
+      val tasksIterator = for ((p1: DNASeq, p2: DNASeq) <- data.getPairs.take(takeFirst) if p1.length >= k && p2.length >= k) yield { () =>
+        val f1 = graphMap.getAll(p1.take(k))
+        val f2 = graphMap.getAll(p2.take(k).revComplement)
+        val f3 = graphMap.getAll(p2.take(k))
+        val f4 = graphMap.getAll(p1.take(k).revComplement)
+        for (s1 <- f1; s2 <- f2; s3 <- f3; s4 <- f4) yield {
+          for ((p1, p2) <- List((s1.toList, s2.toList), (s3.toList, s4.toList)).flatMap(annotate(_).toTraversable)) {
+            val pairs = for (pos1 <- p1; pos2 <- p2) yield (pos1, pos2)
+            val futures = for ((pos1, pos2) <- pairs) yield {
+              val endNode = pos2 match {
+                case NodeGraphPosition(nodeId) => graph.getNode(nodeId)
+                case EdgeGraphPosition(edgeId, _) => graph.getEdge(edgeId).start
               }
-              val startEdge = pos1 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
-              val endEdge = pos2 match { case EdgeGraphPosition(edge, _) => edge; case _ => null }
-              val reachableSet = reachable(node2)
-              reachables += reachableSet.size
-              val memo = collection.mutable.Map[(Edge, Int), Boolean]()
-              def dfs(node1: Node, dist1: Int, prevEdge: Edge): Boolean = {
-                if (memo.contains((prevEdge, dist1 / 5))) {
-                  memo((prevEdge, dist1 / 5))
-                } else if (dist1 + dist2 + reachableSet.getOrElse(node1, range.last + 1) > range.last) {
-                  false
-                } else {
-                  var cur = if (node1 == node2 && range.contains(dist1 + dist2)) {
-                    if (prevEdge != null && endEdge != null) {
-                      pathEdges += prevEdge -> endEdge
-                    }
-                    true
-                  } else false
-                  node1.outEdges.values.foreach { e =>
-                    val res = dfs(e.end, dist1 + e.seq.length, e)
-                    if (res && prevEdge != null) {
-                      pathEdges += prevEdge -> e
-                    }
-                    cur |= res
-                  }
-                  memo((prevEdge, dist1 / 5)) = cur
-                  cur
+              def fix(i: Int) = if (i < 0) i + partitions.size else i
+              val actorId = fix(endNode.hashCode % partitions.size)
+              val actorRef = partitions(actorId)
+              (actorRef ? (pos1, pos2)).mapTo[(Boolean, collection.mutable.Set[(Long, Long)])]
+            }
+            for (list <- Future.sequence(futures) if !list.isEmpty) {
+              val (goods, pathEdgesList) = list.unzip
+              val good = goods.exists(identity)
+              val pathEdges = pathEdgesList.reduce(_ ++ _)
+              for (es <- pathEdges) {
+                val counter = {
+                  if (!pathsMap.contains(es)) pathsMap.putIfAbsent(es, new AtomicInteger(0))
+                  pathsMap(es)
                 }
+                counter.incrementAndGet()
               }
-              val (node0, dist0) = pos1 match {
-                case NodeGraphPosition(n) => (n, 0)
-                case EdgeGraphPosition(edge, dist) =>
-                  (edge.end, edge.seq.length - dist)
+              if (!good) {
+                badPairs += 1
               }
-              val paths = dfs(node0, dist0, startEdge)
-              good |= paths
-            }
-            for (es <- pathEdges) {
-              val counter = {
-                if (!pathsMap.contains(es)) pathsMap.putIfAbsent(es, new AtomicInteger(0))
-                pathsMap(es)
-              }
-              counter.incrementAndGet()
-            }
-            if (!good) {
-              badPairs += 1
             }
           }
-          count += chunk.size
         }
+      }
+      
+      def executeAll(genFutures: TraversableOnce[() => Future[Unit]], total: Long, progress: ConsoleProgress) {
+        val concurrency = 500
+        val semaphore = new Semaphore(concurrency)
+        var count = 0
+        for (genFuture <- genFutures) {
+          semaphore.acquire()
+          genFuture().onComplete(_ => semaphore.release())
+          count += 1
+          progress(count.toDouble / total)
+        }
+        semaphore.acquire(concurrency)
+      }
+      
+      executeAll(tasksIterator, data.count max takeFirst, progress)
     
+      {
         logger.info("Bad pairs: " + badPairs)
-        logger.info("Not found pairs: " + notFoundPairs1 + " " + notFoundPairs2)
     
         val outf = new PrintWriter(new FileWriter(outfile))
     
@@ -220,7 +272,7 @@ object GraphSimplifier extends Bootable {
         for (node <- graph.getNodes; in = node.inEdgeIds.toArray; out = node.outEdgeIds.values.toArray
              if in.size > 0 && out.size > 0) {
           val matrix = Array.tabulate(in.size, out.size) { (i, j) =>
-            pathsMap.get((graph.getEdge(in(i)), graph.getEdge(out(j)))).map(_.get).getOrElse(0)
+            pathsMap.get((graph.getEdge(in(i)).id, graph.getEdge(out(j)).id)).map(_.get).getOrElse(0)
           }
           val colLeft = new Array[Boolean](in.size)
           val colRight = new Array[Boolean](out.size)
@@ -307,5 +359,8 @@ object GraphSimplifier extends Bootable {
 
   def shutdown() {}
 
-  def main(args: List[String]) {startup()}
+}
+
+object GraphSimplifier {
+  def main(args: Array[String]) {new GraphSimplifier().startup()}
 }

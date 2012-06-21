@@ -8,6 +8,7 @@ import akka.event.Logging
 import akka.actor.{Actor, ActorSystem}
 import akka.pattern._
 import ru.ifmo.genome.scripts.ActorsHome
+import akka.event.slf4j.SLF4JLogging
 
 
 /**
@@ -28,7 +29,7 @@ object Messages {
   case class mapReduce[T, T1, T2](map: ((DNASeq, T)) => Option[T1], reduce: Seq[T1] => T2) extends DNAMapMessages
 }
 
-trait DNAMapActor[T] extends Actor {
+trait DNAMapActor[T] extends Actor with SLF4JLogging {
   self: DNAMap[T] =>
   def receive = {
     case Messages.size() => size pipeTo sender
@@ -41,6 +42,7 @@ trait DNAMapActor[T] extends Actor {
     case Messages.contains(key) => contains(key) pipeTo sender
     case Messages.mapReduce(map: (((DNASeq, T)) => Option[_]), reduce: Function1[Seq[_], _]) =>
       mapReduce(map, reduce) pipeTo sender
+    case x => log.error("Unknown message: " + x.toString)
   }
 }
 
@@ -164,6 +166,7 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], as: ActorSystem) ex
       while (i < bins) {
         if (set(i) && !del(i) && p(DNASeq.read(keys, i * sizeOfK, k), getAr(i))) {
           del += i
+          size -= 1
         }
         i += 1
       }
@@ -185,21 +188,21 @@ class ArrayDNAMap[T](k: Byte)(implicit mf: ClassManifest[T], as: ActorSystem) ex
     Promise successful container.getAll(key)
   }
   
-  def update(key: DNASeq, v: T) = {
+  def update(key: DNASeq, v: T) {
     assert(key.length == k)
     container.update(key, v)
     rescale()
     Promise successful ()
   }
 
-  def update(key: DNASeq, v0: T, update: T => T) = {
+  def update(key: DNASeq, v0: T, update: T => T) {
     assert(key.length == k)
     container.update(key, v0, update)
     rescale()
     Promise successful ()
   }
 
-  def putNew(key: DNASeq, v: T) = {
+  def putNew(key: DNASeq, v: T) {
     assert(key.length == k)
     container.putNew(key, v)
     rescale()
